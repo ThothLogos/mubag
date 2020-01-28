@@ -1,6 +1,10 @@
 #!/bin/bash
 
 EDITOR="nano"
+ZIP=""
+ALGO=""
+
+source config.sh
 
 display_usage() {
   echo -e "
@@ -41,7 +45,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [[ $add ]];then
-  echo "Add true, FILE $FILE"
+    echo "add - $FILE"
+  if [[ $ZIP ]]; then
+    echo "zip exists at $ZIP - unpacking"
+  else
+    echo "zip empty - creating new archive"
+  fi
 fi
 
 if [[ $out ]];then
