@@ -1,9 +1,5 @@
 #!/bin/bash
 
-EDITOR="nano"
-ZIP=""
-ALGO=""
-
 source config.sh
 
 display_usage() {
@@ -38,20 +34,31 @@ while [ "$#" -gt 0 ]; do
     --out=*) out=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
     --add|--out|--edit) echo "error: $1 requires an equal sign, ex: $1=FILE" >&2; exit 1;;
-
+    
     -*) echo "unknown option: $1" >&2; display_usage; exit 1;;
     *) handle_argument "$1"; shift 1;;
   esac
 done
 
+
 if [[ $add ]] && [[ -f $FILE ]];then
   echo "ADD BEGIN: $FILE"
   if [[ $ZIPLOC ]] && [[ -f $ZIPLOC ]]; then
-    echo "ADD: zip exists at $ZIPLOC - unpacking"
+    echo "ADD: zip already exists at $ZIPLOC - updating"
+    zip -u -r -j $ZIPLOC $FILE
+    if [[ $? -eq 0 ]]; then
+      echo "ADD: update successful"
+      # TODO: encrypt
+    else
+      echo "ADD FAIL: unzip error! Exiting."
+      exit 1
+    fi
   else
-    echo "ADD: zip empty - creating new archive"
-    if [[ $(zip $DATADIR/gatest.zip $FILE) -eq 0 ]]; then
+    echo "ADD: zip not found - creating new archive at $ZIPLOC"
+    zip -r -j $ZIPLOC $FILE # -j ignores directory structure of incoming file location
+    if [[ $? -eq 0 ]]; then
       echo "ADD SUCCESS: $FILE successfully added to $ZIPLOC"
+      # TODO: encrypt
     else
       echo "ADD FAIL: zip error! Exiting."
       exit 1
@@ -69,3 +76,7 @@ fi
 if [[ $edit ]];then
   echo "Edit true, FILE $FILE"
 fi
+
+
+
+exit 0
