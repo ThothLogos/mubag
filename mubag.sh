@@ -6,8 +6,13 @@ display_usage() {
   echo -e "
 Usage: $(basename $0) [OPTION] [FILE]
 
+ * NOTICE: All options can decrypt and unpack the archive temporarily. The
+           decrypted data is exposed temporarily on the filesystem for a short
+           amount of time while operations execute.
+
+ * Any time files are cleaned up, we attempt to use \\'shred\\' to ensure no recovery.  
  * Limited to one OPTION per execution, select which operation to run
- * Beware, all options decrypt and unpack the archive temporarily
+
 
 OPTIONS:\n
   -a, --add=FILE               Add FILE to archive, repack
@@ -40,43 +45,83 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-
-if [[ $add ]] && [[ -f $FILE ]];then
-  echo "ADD BEGIN: $FILE"
-  if [[ $ZIPLOC ]] && [[ -f $ZIPLOC ]]; then
-    echo "ADD: zip already exists at $ZIPLOC - updating"
-    zip -u -r -j $ZIPLOC $FILE
-    if [[ $? -eq 0 ]]; then
-      echo "ADD: update successful"
-      # TODO: encrypt
+main() {
+  if [[ $add ]] && [[ -f $FILE ]];then
+    echo "ADD BEGIN: $FILE"
+    if [[ $ZIPLOC ]] && [[ -f $ZIPLOC ]]; then
+      echo "ADD: zip already exists at $ZIPLOC - updating"
+      decrypt_zip
+      create_or_update_zip
+      encrypt_zip
+      remove_zip
     else
-      echo "ADD FAIL: unzip error! Exiting."
+      echo "ADD: zip not found - creating new archive at $ZIPLOC"
+      create_or_update_zip
+      encrypt_zip
+      remove_zip
+    fi
+  elif [[ $out ]];then
+    echo "Out true, FILE $FILE"
+  elif [[ $edit ]];then
+    echo "Edit true, FILE $FILE"
+  else
+    echo "ADD FAIL: $FILE not found! Exiting."
+    exit 1
+  fi
+}
+
+remove_zip() {
+  # check for presence of secure file removal tools, prioritize over simple rm
+  if command -v shred >/dev/null; then
+    echo "CLEANUP: shred exists on system, shredding old zip"
+    shred -uvz $ZIPLOC # -u delete file, -v verbose, -z zero out before deletion
+    if [[ $? -eq 0 ]]; then
+      echo "CLEANUP: success, shred complete"
+    else
+      echo "CLEANUP FAIL: shred failed!"
       exit 1
     fi
   else
-    echo "ADD: zip not found - creating new archive at $ZIPLOC"
-    zip -r -j $ZIPLOC $FILE # -j ignores directory structure of incoming file location
+    echo "CLEANUP: advanced file erasure not found, resorting to rm"
+    rm $ZIPLOC
     if [[ $? -eq 0 ]]; then
-      echo "ADD SUCCESS: $FILE successfully added to $ZIPLOC"
-      # TODO: encrypt
+      echo "CLEANUP: success, rm of zip complete"
     else
-      echo "ADD FAIL: zip error! Exiting."
+      echo "CLEANUP FAIL: rm failed!"
       exit 1
     fi
   fi
-else
-  echo "ADD FAIL: $FILE not found! Exiting."
-  exit 1
-fi
+}
 
-if [[ $out ]];then
-  echo "Out true, FILE $FILE"
-fi
+create_or_update_zip() {
+  zip -u -r -j $ZIPLOC $FILE # -u update, -j ignores directory structure of $FILE
+  if [[ $? -eq 0 ]]; then
+    echo "ADD: create/update successful"
+  else
+    echo "ADD FAIL: unzip error! Exiting."
+    exit 1
+  fi
+}
 
-if [[ $edit ]];then
-  echo "Edit true, FILE $FILE"
-fi
+encrypt_zip() {
+  gpg --cipher-algo $ALGO --symmetric $ZIPLOC
+  if [[ $? -eq 0 ]]; then
+    echo "ENCRYPT: successful"
+  else
+    echo "ENCRYPT FAIL: gpg encryption error. Exiting,"
+    exit 1
+  fi
+}
 
+decrypt_zip() {
+  gpg -o $ZIPLOC --decrypt $ZIPLOC.gpg
+  if [[ $? -eq 0 ]]; then
+    echo "ENCRYPT: successful"
+  else
+    echo "ENCRYPT FAIL: gpg encryption error. Exiting,"
+    exit 1
+  fi
+}
 
-
+main
 exit 0
