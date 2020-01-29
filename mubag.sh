@@ -44,13 +44,22 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [[ $add ]];then
-    echo "add - $FILE"
-  if [[ $ZIP ]]; then
-    echo "zip exists at $ZIP - unpacking"
+if [[ $add ]] && [[ -f $FILE ]];then
+  echo "ADD BEGIN: $FILE"
+  if [[ $ZIPLOC ]] && [[ -f $ZIPLOC ]]; then
+    echo "ADD: zip exists at $ZIPLOC - unpacking"
   else
-    echo "zip empty - creating new archive"
+    echo "ADD: zip empty - creating new archive"
+    if [[ $(zip $DATADIR/gatest.zip $FILE) -eq 0 ]]; then
+      echo "ADD SUCCESS: $FILE successfully added to $ZIPLOC"
+    else
+      echo "ADD FAIL: zip error! Exiting."
+      exit 1
+    fi
   fi
+else
+  echo "ADD FAIL: $FILE not found! Exiting."
+  exit 1
 fi
 
 if [[ $out ]];then
