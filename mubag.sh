@@ -1,28 +1,66 @@
 #!/bin/bash
 
 # TODO: Complete --edit/-e functionality
-# TODO: Verify all early exits don't leave a zip behind.
 # TODO: Trap CTRL-C to attempt cleanups there as well
+# TODO: Add -l/--list option, to view contents of a backup archive
+# TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
+# TODO: What happens when when --out a non-ASCII file? :) Can we detect that early?
 
 source config.sh
 
 display_usage() {
   echo -e "
-Usage: $(basename $0) [OPTION] [FILE]
+Usage: $(basename $0) [OPTION] [FILE] -b [EXISTING BACKUP]
 
- * ${RED}$(tput bold)NOTICE${RST}: All options can decrypt and unpack the archive temporarily. The
-           decrypted data is exposed temporarily on the filesystem for a short
-           amount of time while operations execute.
+ * ${YEL}$(tput bold)NOTICE${RST}: All options will decrypt and unpack the archive temporarily. The
+           decrypted data is exposed on the filesystem for a short amount of
+           time while operations execute. Attempts are made to use secure file
+           removal tools like 'srm' and 'shred', but 'rm' is used for cleanup
+           tasks in the event of these tools not being available.
 
- * Any time files are cleaned up, we attempt to use \\'shred\\' to ensure no recovery.  
- * Limited to one OPTION per execution, select which operation to run
+OPTIONS:
 
+  -b FILE, --existing-backup=FILE   Specify existing encrypted archive to use
 
-OPTIONS:\n
-  -b, --existing-backup=FILE      Specify an existing encrypted archive to update
-  -a, --add=FILE                  Add FILE to archive, repack
-  -o, --out=FILE                  Print contents of FILE to STDOUT, repack
-  -e, --edit=FILE                 Open FILE in $EDITOR for modification, repack
+  -l, --list                        List contents of backup archive, repack
+  -a FILE, --add=FILE               Add FILE to archive (or create a new one)
+  -o FILE, --out=FILE               Print contents of FILE to STDOUT, repack
+  -e FILE, --edit=FILE              Open FILE in $EDITOR for modification, repack
+
+  -v, --verbose                     Increase output to assist in debugging
+  -ex, --examples                   Print examples of usage
+  -h, --help                        This screen
+"
+}
+
+display_examples() {
+  echo "
+EXAMPLES:
+
+  Create a new encrypted archive, use any file:
+
+    mubag.sh --add=backup.txt
+    mubag.sh -a dirtypic.png
+
+  List contents of existing encrypted archive:
+
+    mubag.sh --list --existing-backup=/home/user/backup.zip.gpg
+    mubag.sh -l -b /home/user/backup.zip.gpg
+
+  Add new file to existing encrypted archive:
+
+    mubag.sh --add=qr_code.jpg --existing-backup=/home/user/backup.zip.gpg
+    mubag.sh -a latest.log -b /home/user/backup.zip.gpg
+
+  Print contents of file inside an encrypted archive to STDOUT:
+
+    mubag.sh --out secrets.txt --existing-backup=/home/user/backup.zip.gpg
+    mubag.sh -o recovery_key -b /home/user/backup.zip.gpg
+
+  Edit existing file inside an encrypted archive:
+
+    mubag.sh --edit 2fa.bak -b /home/user/backup.zip.gpg
+    mubag.sh -e rosebud.conf --existing-backup=/home/user/backup.zip.gpg
 "
 }
 
@@ -35,6 +73,7 @@ fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help) display_usage; exit 0;;
+    -ex|--examples) display_examples; exit 0;;
     -v|--verbose) verbose=true; shift 1;; 
 
     -b) existing=true; EXISTING="$2"; shift 2;;
@@ -102,25 +141,41 @@ output_requested_file_from_archive() {
 }
 
 secure_remove_file() {
-  if command -v shred >/dev/null; then # prioritize secure removal over simple rm, if avail
+  if command -v srm >/dev/null; then
+    [[ $verbose ]] && echo "${YEL}$(tput bold)CLEANUP${RST}: srm exists on system, target $1"
+    srm -zv $1 # -z zero-out, -v verbose (srm can be slow, shows progress)
+    if [[ $? -eq 0 ]]; then
+      echo "${YEL}$(tput bold)CLEANUP${RST}: success, srm of $1 complete - decrypted archive is securely purged"
+    else
+      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}:: shred failed!"
+      unsecure_remove_file $1
+      exit 1
+    fi
+  elif command -v shredd >/dev/null; then # prioritize secure removal over simple rm, if avail
     [[ $verbose ]] && echo "${YEL}$(tput bold)CLEANUP${RST}: shred exists on system, shredding $1"
-    shred -uz $1 # -u delete file, -v verbose, -z zero-out before deletion
+    shred -uz $1 # -u delete file, -z zero-out
     if [[ $? -eq 0 ]]; then
       echo "${YEL}$(tput bold)CLEANUP${RST}: success, shred of $1 complete - decrypted archive is securely purged"
     else
       echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}:: shred failed!"
-      # TODO: fallback rm if shred really did fail
+      unsecure_remove_file $1
       exit 1
     fi
+  else # resort to rm'ing
+    echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}FALLBACK${RST}: secure file erasure not found, resorting to rm"
+    unsecure_remove_file $1
+  fi
+}
+
+unsecure_remove_file() {
+  rm -f $1
+  if [[ $? -eq 0 ]]; then
+    echo "${YEL}$(tput bold)CLEANUP${RST}: rm of $1 complete - ${RED}$(tput bold)WARNING${RST} decrypted" \
+      "archive may still be recoverable!"
   else
-    echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}FALLBACK${RST}: secure file erasure shred not found, resorting to rm"
-    rm $1
-    if [[ $? -eq 0 ]]; then
-      echo "${YEL}$(tput bold)CLEANUP${RST}: success, rm of $1 complete - decrypted archive may be recoverable!"
-    else
-      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: rm failed!"
-      exit 1
-    fi
+    echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: rm failed!"
+    # TODO: what else can be done, just warn harder? why might this fail?
+    exit 1
   fi
 }
 
@@ -139,6 +194,8 @@ create_or_update_zip() {
     echo "${GRN}$(tput bold)ADD${RST}: archive creation/update successful"
   elif [[ $? -eq 12 ]]; then
     echo "${GRN}$(tput bold)ADD${RST} ${YEL}$(tput bold)NO-OP${RST}:: zip update failed 'nothing to do'?"
+    if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
+    exit 1
   else
     echo "${GRN}$(tput bold)ADD${RST} ${RED}$(tput bold)FAIL${RST}:: unknown zip creation or update error! Exiting."
     if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
@@ -152,6 +209,7 @@ decrypt_zip() {
     echo "$(tput bold)${CYN}DECRYPT${RST}: successful"
   else
     echo "$(tput bold)${CYN}DECRYPT${RST} ${RED}$(tput bold)FAIL${RST}:: gpg decryption error. Exiting,"
+    if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
     exit 1
   fi
 }
@@ -162,6 +220,7 @@ encrypt_zip() {
     echo "$(tput bold)${BLU}ENCRYPT${RST}: successful"
   else
     echo "$(tput bold)${BLU}ENCRYPT${RST} ${RED}$(tput bold)FAIL${RST}:: gpg encryption error. Exiting,"
+    if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
     exit 1
   fi
 }
