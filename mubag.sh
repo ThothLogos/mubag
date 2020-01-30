@@ -1,5 +1,10 @@
 #!/bin/bash
 
+
+# TODO: Add verbose mode for most progress messaging - need debug too? (prob not)
+# TODO: Add color to outputs
+# TODO: Delete ZIPLOC from decrypt function, not needed probably (confirm)
+
 source config.sh
 
 display_usage() {
@@ -31,6 +36,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --help) display_usage; exit 0;;
 
+    -b) existing=true; EXISTING="$2"; shift 2;;
     -a) add=true; FILE="$2"; shift 2;;
     -o) out=true; FILE="$2"; shift 2;;
     -e) edit=true; FILE="$2"; shift 2;;
@@ -46,7 +52,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-
 main() {
   if [[ $add ]] && [[ -f $FILE ]];then
     echo "ADD BEGIN: $FILE"
@@ -55,7 +60,7 @@ main() {
       decrypt_zip
       create_or_update_zip
       encrypt_zip
-      remove_zip
+      secure_remove_file $ZIPLOC
     elif [[ -f $ZIPLOC.gpg ]]; then
       echo 'ADD ERROR: file $ZIPLOC.gpg exists but --existing-backup= is not set, please' \
         're-run with this option to confirm updating the existing file. If you intended to' \
@@ -67,10 +72,21 @@ main() {
       echo "ADD: existing backup not found - creating new archive at $ZIPLOC"
       create_or_update_zip
       encrypt_zip
-      remove_zip
+      secure_remove_file $ZIPLOC
     fi
   elif [[ $out ]];then
-    echo "Out true, FILE $FILE"
+    echo "OUT BEGIN: $FILE"
+    if [[ $EXISTING ]] && [[ -f $EXISTING ]]; then
+      echo "OUT: backup already exists at $EXISTING - decrypting"
+      decrypt_zip
+      output_requested_file_from_archive
+      secure_remove_file $ZIPLOC
+    else
+      echo 'OUT FAIL: --existing-backup= either not set or the backup was not found.' \
+        'Unable to output contents of requested backup file, please check and re-try.' \
+        'Exiting.'
+      exit 1
+    fi
   elif [[ $edit ]];then
     echo "Edit true, FILE $FILE"
   else
@@ -79,11 +95,16 @@ main() {
   fi
 }
 
-remove_zip() {
-  # check for presence of secure file removal tools, prioritize over simple rm
-  if command -v shred >/dev/null; then
-    echo "CLEANUP: shred exists on system, shredding old zip"
-    shred -uvz $ZIPLOC # -u delete file, -v verbose, -z zero out before deletion
+output_requested_file_from_archive() {
+  echo -e "OUT: routing $FILE to STDOUT from ${EXISTING%????}"
+  echo -e ""
+  unzip -p ${EXISTING%????} $FILE
+}
+
+secure_remove_file() {
+  if command -v shred >/dev/null; then # prioritize secure removal over simple rm, if avail
+    echo "CLEANUP: shred exists on system, shredding $1"
+    shred -uvz $1 # -u delete file, -v verbose, -z zero-out before deletion
     if [[ $? -eq 0 ]]; then
       echo "CLEANUP: success, shred complete"
     else
@@ -92,9 +113,9 @@ remove_zip() {
     fi
   else
     echo "CLEANUP: advanced file erasure not found, resorting to rm"
-    rm $ZIPLOC
+    rm $1
     if [[ $? -eq 0 ]]; then
-      echo "CLEANUP: success, rm of zip complete"
+      echo "CLEANUP: success, rm of $1 complete"
     else
       echo "CLEANUP FAIL: rm failed!"
       exit 1
@@ -103,11 +124,22 @@ remove_zip() {
 }
 
 create_or_update_zip() {
-  zip -u -r -j $ZIPLOC $FILE # -u update, -j ignores directory structure of $FILE
+  zip -u -r -j $ZIPLOC $FILE # -u update zip (if it exists), -j ignores dir structure of $FILE
   if [[ $? -eq 0 ]]; then
     echo "ADD: create/update successful"
   else
     echo "ADD FAIL: unzip error! Exiting."
+    exit 1
+  fi
+}
+
+decrypt_zip() {
+  if [[ $EXISTING ]]; then local target=${EXISTING%????}; else local target=$ZIPLOC; fi
+  gpg --no-symkey-cache -o $target --decrypt $target.gpg
+  if [[ $? -eq 0 ]]; then
+    echo "DECRYPT: successful"
+  else
+    echo "DECRYPT FAIL: gpg decryption error. Exiting,"
     exit 1
   fi
 }
@@ -122,15 +154,6 @@ encrypt_zip() {
   fi
 }
 
-decrypt_zip() {
-  gpg --no-symkey-cache -o $ZIPLOC --decrypt $ZIPLOC.gpg
-  if [[ $? -eq 0 ]]; then
-    echo "ENCRYPT: successful"
-  else
-    echo "ENCRYPT FAIL: gpg encryption error. Exiting,"
-    exit 1
-  fi
-}
 
 main
 exit 0
