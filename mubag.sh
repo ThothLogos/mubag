@@ -10,7 +10,7 @@ source config.sh
 
 display_usage() {
   echo -e "
-Usage: $(basename $0) [OPTION] [FILE] -b [EXISTING BACKUP ARCHIVE]
+Usage: $(basename $0) [OPTION] [FILE] ( -o [OUTFILE NAME] || -b [EXISTING BACKUP ARCHIVE] )
 
  * ${YEL}$(tput bold)NOTICE${RST}: All options will decrypt and unpack the archive temporarily. The
            decrypted data is exposed on the filesystem for a short amount of
@@ -20,16 +20,19 @@ Usage: $(basename $0) [OPTION] [FILE] -b [EXISTING BACKUP ARCHIVE]
 
 OPTIONS:
 
-  -b FILE, --backup=FILE            Specify existing encrypted archive to use
+  -o FILE, --out=FILE           Specify name of output file
+  -d DIR,  --dir=DIR            Specify a directory to send the --out FILE
+                                  (default: local to $(basename $0))
+  -b FILE, --backup=FILE        Specify existing encrypted archive to use
 
-  -l, --list                        List contents of backup archive, repack
-  -a FILE, --add=FILE               Add FILE to archive (or create a new one)
-  -p FILE, --print=FILE             Print contents of FILE to STDOUT, repack
-  -e FILE, --edit=FILE              Open FILE in $EDITOR for modification, repack
+  -l, --list                    List contents of backup archive, repack
+  -a FILE, --add=FILE           Add FILE to archive (or create a new one)
+  -p FILE, --print=FILE         Print contents of FILE to STDOUT, repack
+  -e FILE, --edit=FILE          Open FILE in $EDITOR for modification, repack
 
-  -v, --verbose                     Increase output to assist in debugging
-  -ex, --examples                   Print examples of usage
-  -h, --help                        This screen
+  -v, --verbose                 Increase output to assist in debugging
+  -ex, --examples               Print examples of usage
+  -h, --help                    This screen
 "
 }
 
@@ -76,18 +79,19 @@ while [ "$#" -gt 0 ]; do
     -ex|--examples) display_examples; exit 0;;
     -v|--verbose) verbose=true; shift 1;; 
 
-    -b) existing=true; EXISTING="$2"; shift 2;;
+    -b|--backup) BACKUP="$2"; shift 2;;
 
     -l|--list) list=true; shift 1;;
-    -a) add=true; FILE="$2"; shift 2;;
-    -p) prnt=true; FILE="$2"; shift 2;;
-    -e) edit=true; FILE="$2"; shift 2;;
+    -a|--add) add=true; FILE="$2"; shift 2;;
+    -p|--print) prnt=true; FILE="$2"; shift 2;;
+    -e|--edit) edit=true; FILE="$2"; shift 2;;
+    -o|--out) out=true; OUTFILE="$2"; shift 2;;
 
-    --backup=*) existing=true; EXISTING="${1#*=}"; shift 1;;
+    --backup=*) BACKUP="${1#*=}"; shift 1;;
     --add=*) add=true; FILE="${1#*=}"; shift 1;;
     --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
-    --add|--out|--edit) echo -e "${RED}$(tput bold)ERROR${RST}: $1 requires an equal sign, ex: $1=FILE" >&2; exit 1;;
+    --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
     
     -*) echo -e "${RED}$(tput bold)ERROR${RST}: unknown option $1" >&2; display_usage; exit 1;;
     *) handle_argument "$1"; shift 1;;
@@ -102,8 +106,8 @@ main() {
     secure_remove_file $ZIPLOC
   elif [[ $add ]] && [[ -f $FILE ]];then
     [[ $verbose ]] && echo "${GRN}$(tput bold)ADD${RST} BEGIN: $FILE"
-    if [[ $EXISTING ]] && [[ -f $EXISTING ]]; then
-      [[ $verbose ]] && echo "${GRN}$(tput bold)ADD${RST}: backup already exists at $EXISTING - decrypting"
+    if [[ $BACKUP ]] && [[ -f $BACKUP ]]; then
+      [[ $verbose ]] && echo "${GRN}$(tput bold)ADD${RST}: backup already exists at $BACKUP - decrypting"
       decrypt_zip
       create_or_update_zip
       encrypt_zip
@@ -122,8 +126,8 @@ main() {
     fi
   elif [[ $prnt ]];then
     [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST} BEGIN: $FILE"
-    if [[ $EXISTING ]] && [[ -f $EXISTING ]]; then
-      [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST}: backup already exists at $EXISTING - decrypting"
+    if [[ $BACKUP ]] && [[ -f $BACKUP ]]; then
+      [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST}: backup already exists at $BACKUP - decrypting"
       decrypt_zip
       print_requested_file_from_archive
       secure_remove_file $ZIPLOC
@@ -141,16 +145,16 @@ main() {
 }
 
 list_archive_contents() {
-  if ! [[ $EXISTING ]] || ! [[ -f $EXISTING ]]; then
+  if ! [[ $BACKUP ]] || ! [[ -f $BACKUP ]]; then
     echo "${RED}$(tput bold)ERROR${RST}: must set -b/--backup= !"
   fi
-  unzip -l ${EXISTING%????}
+  unzip -l ${BACKUP%????}
 }
 
 print_requested_file_from_archive() {
-  [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST}: routing $FILE to STDPRINT from ${EXISTING%????}"
+  [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST}: routing $FILE to STDPRINT from ${BACKUP%????}"
   echo "${WHT}$(tput bold)--- BEGIN OUTPUT ---${RST}"
-  unzip -p ${EXISTING%????} $(basename $FILE)
+  unzip -p ${BACKUP%????} $(basename $FILE)
   echo "${WHT}$(tput bold)---  END OUTPUT  ---${RST}"
 }
 
@@ -194,7 +198,7 @@ unsecure_remove_file() {
 }
 
 create_or_update_zip() {
-  if [[ $EXISTING ]]; then # check for potential duplicate file
+  if [[ $BACKUP ]]; then # check for potential duplicate file
     unzip -l $ZIPLOC | grep -q $(basename $FILE)
     if [[ $? -eq 0 ]]; then
       echo "${RED}$(tput bold)ERROR${RST}: Unable to add $FILE to $ZIPLOC, filename already exists in the archive."
@@ -217,7 +221,7 @@ create_or_update_zip() {
 }
 
 decrypt_zip() {
-  gpg -q --no-symkey-cache -o ${EXISTING%????} --decrypt $EXISTING
+  gpg -q --no-symkey-cache -o ${BACKUP%????} --decrypt $BACKUP
   if [[ $? -eq 0 ]]; then
     echo "$(tput bold)${CYN}DECRYPT${RST}: successful"
   else
@@ -238,6 +242,5 @@ encrypt_zip() {
   fi
 }
 
-trap secure_remove_file $ZIPLOC
 main
 exit 0
