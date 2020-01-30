@@ -10,7 +10,7 @@ source config.sh
 
 display_usage() {
   echo -e "
-Usage: $(basename $0) [OPTION] [FILE] -b [EXISTING BACKUP]
+Usage: $(basename $0) [OPTION] [FILE] -b [EXISTING BACKUP ARCHIVE]
 
  * ${YEL}$(tput bold)NOTICE${RST}: All options will decrypt and unpack the archive temporarily. The
            decrypted data is exposed on the filesystem for a short amount of
@@ -147,7 +147,7 @@ secure_remove_file() {
     if [[ $? -eq 0 ]]; then
       echo "${YEL}$(tput bold)CLEANUP${RST}: success, srm of $1 complete - decrypted archive is securely purged"
     else
-      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}:: shred failed!"
+      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: srm failed!"
       unsecure_remove_file $1
       exit 1
     fi
@@ -157,7 +157,7 @@ secure_remove_file() {
     if [[ $? -eq 0 ]]; then
       echo "${YEL}$(tput bold)CLEANUP${RST}: success, shred of $1 complete - decrypted archive is securely purged"
     else
-      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}:: shred failed!"
+      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: shred failed!"
       unsecure_remove_file $1
       exit 1
     fi
@@ -193,11 +193,11 @@ create_or_update_zip() {
   if [[ $? -eq 0 ]]; then
     echo "${GRN}$(tput bold)ADD${RST}: archive creation/update successful"
   elif [[ $? -eq 12 ]]; then
-    echo "${GRN}$(tput bold)ADD${RST} ${YEL}$(tput bold)NO-OP${RST}:: zip update failed 'nothing to do'?"
+    echo "${GRN}$(tput bold)ADD${RST} ${YEL}$(tput bold)NO-OP${RST}: zip update failed 'nothing to do'?"
     if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
     exit 1
   else
-    echo "${GRN}$(tput bold)ADD${RST} ${RED}$(tput bold)FAIL${RST}:: unknown zip creation or update error! Exiting."
+    echo "${GRN}$(tput bold)ADD${RST} ${RED}$(tput bold)FAIL${RST}: unknown zip creation or update error! Exiting."
     if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
     exit 1
   fi
@@ -208,7 +208,7 @@ decrypt_zip() {
   if [[ $? -eq 0 ]]; then
     echo "$(tput bold)${CYN}DECRYPT${RST}: successful"
   else
-    echo "$(tput bold)${CYN}DECRYPT${RST} ${RED}$(tput bold)FAIL${RST}:: gpg decryption error. Exiting,"
+    echo "$(tput bold)${CYN}DECRYPT${RST} ${RED}$(tput bold)FAIL${RST}: gpg decryption error. Exiting,"
     if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
     exit 1
   fi
@@ -219,7 +219,7 @@ encrypt_zip() {
   if [[ $? -eq 0 ]]; then
     echo "$(tput bold)${BLU}ENCRYPT${RST}: successful"
   else
-    echo "$(tput bold)${BLU}ENCRYPT${RST} ${RED}$(tput bold)FAIL${RST}:: gpg encryption error. Exiting,"
+    echo "$(tput bold)${BLU}ENCRYPT${RST} ${RED}$(tput bold)FAIL${RST}: gpg encryption error. Exiting,"
     if [[ -f $ZIPLOC ]]; then secure_remove_file $ZIPLOC; fi
     exit 1
   fi
