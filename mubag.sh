@@ -39,28 +39,28 @@ EXAMPLES:
 
   Create a new encrypted archive, use any file:
 
-    mubag.sh --add=backup.txt
-    mubag.sh -a dirtypic.png
+    $(basename $0) --add=backup.txt
+    $(basename $0) -a dirtypic.png
 
   List contents of existing encrypted archive:
 
-    mubag.sh --list --existing-backup=/home/user/backup.zip.gpg
-    mubag.sh -l -b /home/user/backup.zip.gpg
+    $(basename $0) --list --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) -l -b /home/user/backup.zip.gpg
 
   Add new file to existing encrypted archive:
 
-    mubag.sh --add=qr_code.jpg --existing-backup=/home/user/backup.zip.gpg
-    mubag.sh -a latest.log -b /home/user/backup.zip.gpg
+    $(basename $0) --add=qr_code.jpg --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) -a latest.log -b /home/user/backup.zip.gpg
 
   Print contents of file inside an encrypted archive to STDOUT:
 
-    mubag.sh --out secrets.txt --existing-backup=/home/user/backup.zip.gpg
-    mubag.sh -o recovery_key -b /home/user/backup.zip.gpg
+    $(basename $0) --out secrets.txt --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) -o recovery_key -b /home/user/backup.zip.gpg
 
   Edit existing file inside an encrypted archive:
 
-    mubag.sh --edit 2fa.bak -b /home/user/backup.zip.gpg
-    mubag.sh -e rosebud.conf --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) --edit 2fa.bak -b /home/user/backup.zip.gpg
+    $(basename $0) -e rosebud.conf --existing-backup=/home/user/backup.zip.gpg
 "
 }
 
