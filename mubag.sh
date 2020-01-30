@@ -24,7 +24,7 @@ OPTIONS:
 
   -l, --list                        List contents of backup archive, repack
   -a FILE, --add=FILE               Add FILE to archive (or create a new one)
-  -o FILE, --out=FILE               Print contents of FILE to STDOUT, repack
+  -p FILE, --print=FILE             Print contents of FILE to STDOUT, repack
   -e FILE, --edit=FILE              Open FILE in $EDITOR for modification, repack
 
   -v, --verbose                     Increase output to assist in debugging
@@ -54,8 +54,8 @@ EXAMPLES:
 
   Print contents of file inside an encrypted archive to STDOUT:
 
-    $(basename $0) --out secrets.txt --backup=/home/user/backup.zip.gpg
-    $(basename $0) -o recovery_key -b /home/user/backup.zip.gpg
+    $(basename $0) --print secrets.txt -b /home/user/backup.zip.gpg
+    $(basename $0) -p recovery_key --backup=/home/user/backup.zip.gpg
 
   Edit existing file inside an encrypted archive:
 
@@ -80,12 +80,12 @@ while [ "$#" -gt 0 ]; do
 
     -l|--list) list=true; shift 1;;
     -a) add=true; FILE="$2"; shift 2;;
-    -o) out=true; FILE="$2"; shift 2;;
+    -p) prnt=true; FILE="$2"; shift 2;;
     -e) edit=true; FILE="$2"; shift 2;;
 
     --backup=*) existing=true; EXISTING="${1#*=}"; shift 1;;
     --add=*) add=true; FILE="${1#*=}"; shift 1;;
-    --out=*) out=true; FILE="${1#*=}"; shift 1;;
+    --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
     --add|--out|--edit) echo -e "${RED}$(tput bold)ERROR${RST}: $1 requires an equal sign, ex: $1=FILE" >&2; exit 1;;
     
@@ -120,15 +120,15 @@ main() {
       encrypt_zip
       secure_remove_file $ZIPLOC
     fi
-  elif [[ $out ]];then
-    [[ $verbose ]] && echo "${MAG}$(tput bold)OUT${RST} BEGIN: $FILE"
+  elif [[ $prnt ]];then
+    [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST} BEGIN: $FILE"
     if [[ $EXISTING ]] && [[ -f $EXISTING ]]; then
-      [[ $verbose ]] && echo "${MAG}$(tput bold)OUT${RST}: backup already exists at $EXISTING - decrypting"
+      [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST}: backup already exists at $EXISTING - decrypting"
       decrypt_zip
-      output_requested_file_from_archive
+      print_requested_file_from_archive
       secure_remove_file $ZIPLOC
     else
-      echo "${MAG}$(tput bold)OUT${RST} ${RED}$(tput bold)FAIL${RST}: --backup= either not set or" \
+      echo "${MAG}$(tput bold)PRINT${RST} ${RED}$(tput bold)FAIL${RST}: --backup= either not set or" \
       "the backup was not found. Please check and re-try. Exiting."
       exit 1
     fi
@@ -147,8 +147,8 @@ list_archive_contents() {
   unzip -l ${EXISTING%????}
 }
 
-output_requested_file_from_archive() {
-  [[ $verbose ]] && echo "${MAG}$(tput bold)OUT${RST}: routing $FILE to STDOUT from ${EXISTING%????}"
+print_requested_file_from_archive() {
+  [[ $verbose ]] && echo "${MAG}$(tput bold)PRINT${RST}: routing $FILE to STDPRINT from ${EXISTING%????}"
   echo "${WHT}$(tput bold)--- BEGIN OUTPUT ---${RST}"
   unzip -p ${EXISTING%????} $(basename $FILE)
   echo "${WHT}$(tput bold)---  END OUTPUT  ---${RST}"
@@ -238,5 +238,6 @@ encrypt_zip() {
   fi
 }
 
+trap secure_remove_file $ZIPLOC
 main
 exit 0
