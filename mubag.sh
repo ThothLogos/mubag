@@ -1,8 +1,9 @@
 #!/bin/bash
 
 
-# TODO: Add verbose mode for most progress messaging - need debug too? (prob not)
 # TODO: Add color to outputs
+# TODO: Add verbose mode for most progress messaging - need debug too? (prob not)
+# TODO: Complete --edit/-e functionality
 # TODO: Delete ZIPLOC from decrypt function, not needed probably (confirm)
 
 source config.sh
