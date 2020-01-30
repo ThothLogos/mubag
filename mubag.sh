@@ -2,9 +2,9 @@
 
 # TODO: Complete --edit/-e functionality
 # TODO: Trap CTRL-C to attempt cleanups there as well
-# TODO: Add -l/--list option, to view contents of a backup archive
 # TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
 # TODO: What happens when when --out a non-ASCII file? :) Can we detect that early?
+# TODO: Change ZIPNAME to use a prompt, we only really need it for --add creation
 
 source config.sh
 
@@ -20,7 +20,7 @@ Usage: $(basename $0) [OPTION] [FILE] -b [EXISTING BACKUP ARCHIVE]
 
 OPTIONS:
 
-  -b FILE, --existing-backup=FILE   Specify existing encrypted archive to use
+  -b FILE, --backup=FILE            Specify existing encrypted archive to use
 
   -l, --list                        List contents of backup archive, repack
   -a FILE, --add=FILE               Add FILE to archive (or create a new one)
@@ -44,23 +44,23 @@ EXAMPLES:
 
   List contents of existing encrypted archive:
 
-    $(basename $0) --list --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) --list --backup=/home/user/backup.zip.gpg
     $(basename $0) -l -b /home/user/backup.zip.gpg
 
   Add new file to existing encrypted archive:
 
-    $(basename $0) --add=qr_code.jpg --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) --add=qr_code.jpg --backup=/home/user/backup.zip.gpg
     $(basename $0) -a latest.log -b /home/user/backup.zip.gpg
 
   Print contents of file inside an encrypted archive to STDOUT:
 
-    $(basename $0) --out secrets.txt --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) --out secrets.txt --backup=/home/user/backup.zip.gpg
     $(basename $0) -o recovery_key -b /home/user/backup.zip.gpg
 
   Edit existing file inside an encrypted archive:
 
     $(basename $0) --edit 2fa.bak -b /home/user/backup.zip.gpg
-    $(basename $0) -e rosebud.conf --existing-backup=/home/user/backup.zip.gpg
+    $(basename $0) -e rosebud.conf --backup=/home/user/backup.zip.gpg
 "
 }
 
@@ -77,11 +77,13 @@ while [ "$#" -gt 0 ]; do
     -v|--verbose) verbose=true; shift 1;; 
 
     -b) existing=true; EXISTING="$2"; shift 2;;
+
+    -l|--list) list=true; shift 1;;
     -a) add=true; FILE="$2"; shift 2;;
     -o) out=true; FILE="$2"; shift 2;;
     -e) edit=true; FILE="$2"; shift 2;;
 
-    --existing-backup=*) existing=true; EXISTING="${1#*=}"; shift 1;;
+    --backup=*) existing=true; EXISTING="${1#*=}"; shift 1;;
     --add=*) add=true; FILE="${1#*=}"; shift 1;;
     --out=*) out=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
@@ -93,7 +95,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 main() {
-  if [[ $add ]] && [[ -f $FILE ]];then
+  if [[ $list ]]; then
+    [[ $verbose ]] && echo "${BLU}$(tput bold)LIST${RST} BEGIN: $(basename $FILE)"
+    decrypt_zip
+    list_archive_contents
+    secure_remove_file $ZIPLOC
+  elif [[ $add ]] && [[ -f $FILE ]];then
     [[ $verbose ]] && echo "${GRN}$(tput bold)ADD${RST} BEGIN: $FILE"
     if [[ $EXISTING ]] && [[ -f $EXISTING ]]; then
       [[ $verbose ]] && echo "${GRN}$(tput bold)ADD${RST}: backup already exists at $EXISTING - decrypting"
@@ -102,7 +109,7 @@ main() {
       encrypt_zip
       secure_remove_file $ZIPLOC
     elif [[ -f $ZIPLOC.gpg ]]; then
-      echo "${RED}$(tput bold)ERROR${RST}: file $ZIPLOC.gpg exists but --existing-backup= is not set," \
+      echo "${RED}$(tput bold)ERROR${RST}: file $ZIPLOC.gpg exists but --backup= is not set," \
         "please re-run with this option to confirm updating the existing file. If you intended to create" \
         "a new archive, please change the ZIPNAME in config.sh to something unique. This check is to" \
         "prevent accidental over-writing of a previously encrypted archive. Exiting."
@@ -121,7 +128,7 @@ main() {
       output_requested_file_from_archive
       secure_remove_file $ZIPLOC
     else
-      echo "${MAG}$(tput bold)OUT${RST} ${RED}$(tput bold)FAIL${RST}: --existing-backup= either not set or" \
+      echo "${MAG}$(tput bold)OUT${RST} ${RED}$(tput bold)FAIL${RST}: --backup= either not set or" \
       "the backup was not found. Please check and re-try. Exiting."
       exit 1
     fi
@@ -133,10 +140,17 @@ main() {
   fi
 }
 
+list_archive_contents() {
+  if ! [[ $EXISTING ]] || ! [[ -f $EXISTING ]]; then
+    echo "${RED}$(tput bold)ERROR${RST}: must set -b/--backup= !"
+  fi
+  unzip -l ${EXISTING%????}
+}
+
 output_requested_file_from_archive() {
   [[ $verbose ]] && echo "${MAG}$(tput bold)OUT${RST}: routing $FILE to STDOUT from ${EXISTING%????}"
   echo "${WHT}$(tput bold)--- BEGIN OUTPUT ---${RST}"
-  unzip -p ${EXISTING%????} $FILE
+  unzip -p ${EXISTING%????} $(basename $FILE)
   echo "${WHT}$(tput bold)---  END OUTPUT  ---${RST}"
 }
 
@@ -151,7 +165,7 @@ secure_remove_file() {
       unsecure_remove_file $1
       exit 1
     fi
-  elif command -v shredd >/dev/null; then # prioritize secure removal over simple rm, if avail
+  elif command -v shred >/dev/null; then # prioritize secure removal over simple rm, if avail
     [[ $verbose ]] && echo "${YEL}$(tput bold)CLEANUP${RST}: shred exists on system, shredding $1"
     shred -uz $1 # -u delete file, -z zero-out
     if [[ $? -eq 0 ]]; then
@@ -181,8 +195,7 @@ unsecure_remove_file() {
 
 create_or_update_zip() {
   if [[ $EXISTING ]]; then # check for potential duplicate file
-    local filename=$(basename $FILE)
-    unzip -l $ZIPLOC | grep -q $filename
+    unzip -l $ZIPLOC | grep -q $(basename $FILE)
     if [[ $? -eq 0 ]]; then
       echo "${RED}$(tput bold)ERROR${RST}: Unable to add $FILE to $ZIPLOC, filename already exists in the archive."
       secure_remove_file $ZIPLOC
