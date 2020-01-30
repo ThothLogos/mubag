@@ -21,7 +21,7 @@ OPTIONS:\n
 "
 }
 
-if [[ "$#" -lt 1 ]] || [[ "$#" -ge 3 ]]; then
+if [[ "$#" -lt 1 ]]; then
   echo "error: incorrect number of args"
   display_usage
   exit 1
@@ -35,6 +35,7 @@ while [ "$#" -gt 0 ]; do
     -o) out=true; FILE="$2"; shift 2;;
     -e) edit=true; FILE="$2"; shift 2;;
 
+    --existing-backup=*) existing=true; EXISTING="${1#*=}"; shift 1;;
     --add=*) add=true; FILE="${1#*=}"; shift 1;;
     --out=*) out=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
@@ -45,17 +46,25 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+
 main() {
   if [[ $add ]] && [[ -f $FILE ]];then
     echo "ADD BEGIN: $FILE"
-    if [[ $ZIPLOC ]] && [[ -f $ZIPLOC ]]; then
-      echo "ADD: zip already exists at $ZIPLOC - updating"
+    if [[ $EXISTING ]] && [[ -f $EXISTING ]]; then
+      echo "ADD: backup already exists at $EXISTING - decrypting"
       decrypt_zip
       create_or_update_zip
       encrypt_zip
       remove_zip
+    elif [[ -f $ZIPLOC.gpg ]]; then
+      echo 'ADD ERROR: file $ZIPLOC.gpg exists but --existing-backup= is not set, please' \
+        're-run with this option to confirm updating the existing file. If you intended to' \
+        'create a new archive, please change the ZIPNAME in config.sh to something unique.' \
+        'This check is to prevent accidental over-writing of a previously encrypted archive.' \
+        'Exiting.'
+      exit 1
     else
-      echo "ADD: zip not found - creating new archive at $ZIPLOC"
+      echo "ADD: existing backup not found - creating new archive at $ZIPLOC"
       create_or_update_zip
       encrypt_zip
       remove_zip
@@ -104,7 +113,7 @@ create_or_update_zip() {
 }
 
 encrypt_zip() {
-  gpg --cipher-algo $ALGO --symmetric $ZIPLOC
+  gpg --no-symkey-cache --cipher-algo $ALGO --symmetric $ZIPLOC
   if [[ $? -eq 0 ]]; then
     echo "ENCRYPT: successful"
   else
@@ -114,7 +123,7 @@ encrypt_zip() {
 }
 
 decrypt_zip() {
-  gpg -o $ZIPLOC --decrypt $ZIPLOC.gpg
+  gpg --no-symkey-cache -o $ZIPLOC --decrypt $ZIPLOC.gpg
   if [[ $? -eq 0 ]]; then
     echo "ENCRYPT: successful"
   else
