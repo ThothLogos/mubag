@@ -124,7 +124,15 @@ elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remo
   echo "${RD}${BD}ERROR${RS}: Cannot complete this operation without --backup specified!"
 fi
 
+if [[ $add || $update ]] && [[ ! $FILE || ! -f $FILE ]];then
+  echo "${RD}${BD}ERROR${RS}: The file targeted for add/update ($FILE) not found!"
+fi
+
 main() {
+  if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup ]];then
+    decrypt_zip $BACKUP
+    BACKUP=${BACKUP%????} # chop off .gpg
+  fi
   if [ $add ] && ! [ $backup ]; then # create new archive
     if ! [ $out ];then
       echo "${RD}${BD}ERROR${RS}: --add requires either --backup FILE or --out FILE specified," \
@@ -132,15 +140,11 @@ main() {
         "a new backup, use -o/--out to specify the output file's name and location."
       exit 1
     else
-      if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --add FILE $FILE not found!";exit 1;fi
       create_or_update_archive $FILE $OUTFILE
       encrypt_zip $OUTFILE
       secure_remove_file $OUTFILE
     fi
   elif [ $add ] && [ $backup ];then # update existing archive
-    if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --add FILE $FILE not found!";exit 1;fi
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
     local ret=$(check_file_existence $FILE $BACKUP)
     if [[ $ret == "0" ]];then
       secure_remove_file $BACKUP
@@ -156,22 +160,10 @@ main() {
       echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS}: You have just decrypted your backup archive" \
         "and it is exposed on the file system. Please be aware of the risks!"
     fi
-  elif [ $list ];then # list contents of existing archive
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
-    list_archive_contents $BACKUP
-  elif [ $prnt ];then # print contents of file within existing archive
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
-    print_file_from_archive $FILE $BACKUP
-  elif [ $extract ];then # extract a specific file from the archive
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
-    extract_file_from_archive $FILE $BACKUP
+  elif [ $list ];then list_archive_contents $BACKUP
+  elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
+  elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
   elif [ $update ];then
-    if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --update FILE $FILE not found!";exit 1;fi
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
     local ret=$(check_file_existence $FILE $BACKUP)
     if ! [[ $ret == "0" ]];then
       secure_remove_file $BACKUP
@@ -182,17 +174,16 @@ main() {
     create_or_update_archive $FILE $BACKUP
     encrypt_zip $BACKUP
   elif [ $edit ];then # edit contents of text file within existing archive
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
     edit_file_from_archive $FILE $BACKUP
     encrypt_zip $BACKUP
   elif [ $remove ];then # delete a file from an existing archive
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
     remove_file_from_archive $FILE $BACKUP
     encrypt_zip $BACKUP
   fi
-  if [ $BACKUP ] && [ -f $BACKUP ] && ! [ $decrypt ];then secure_remove_file $BACKUP;fi
+  if [ $backup ] && [ -f $BACKUP ] && ! [ $decrypt ];then
+    encrypt_zip $BACKUP
+    secure_remove_file $BACKUP
+  fi
 }
 
 remove_file_from_archive() {
