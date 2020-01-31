@@ -65,7 +65,7 @@ EXAMPLES:
 }
 
 if [ "$#" -lt 1 ]; then
-  echo "${RED}$(tput bold)ERROR${RST}: incorrect number of args"
+  echo "${RED}${BLD}ERROR${RST}: incorrect number of args"
   display_usage
   exit 1
 fi
@@ -213,27 +213,27 @@ list_archive_contents() {
 
 secure_remove_file() {
   if command -v srm >/dev/null; then
-    [[ $verbose ]] && echo "${YEL}$(tput bold)CLEANUP${RST}: srm exists on system, target $1"
+    [[ $verbose ]] && echo "${YEL}${BLD}CLEANUP${RST}: srm exists on system, target $1"
     srm -zv $1 # -z zero-out, -v verbose (srm can be slow, shows progress)
     if [[ $? -eq 0 ]]; then
-      echo "${YEL}$(tput bold)CLEANUP${RST}: success, srm of $1 complete - decrypted archive is securely purged"
+      echo "${YEL}${BLD}CLEANUP${RST}: success, srm of $1 complete - decrypted archive is securely purged"
     else
-      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: srm failed!"
+      echo "${YEL}${BLD}CLEANUP${RST} ${RED}${BLD}FAIL${RST}: srm failed!"
       unsecure_remove_file $1
       exit 1
     fi
   elif command -v shred >/dev/null; then # prioritize secure removal over simple rm, if avail
-    [[ $verbose ]] && echo "${YEL}$(tput bold)CLEANUP${RST}: shred exists on system, shredding $1"
+    [[ $verbose ]] && echo "${YEL}${BLD}CLEANUP${RST}: shred exists on system, shredding $1"
     shred -uz $1 # -u delete file, -z zero-out
     if [[ $? -eq 0 ]]; then
-      echo "${YEL}$(tput bold)CLEANUP${RST}: success, shred of $1 complete - decrypted archive is securely purged"
+      echo "${YEL}${BLD}CLEANUP${RST}: success, shred of $1 complete - decrypted archive is securely purged"
     else
-      echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: shred failed!"
+      echo "${YEL}${BLD}CLEANUP${RST} ${RED}${BLD}FAIL${RST}: shred failed!"
       unsecure_remove_file $1
       exit 1
     fi
   else # resort to rm'ing
-    echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}FALLBACK${RST}: secure file erasure not found, resorting to rm"
+    echo "${YEL}${BLD}CLEANUP${RST} ${RED}FALLBACK${RST}: secure file erasure not found, resorting to rm"
     unsecure_remove_file $1
   fi
 }
@@ -241,10 +241,10 @@ secure_remove_file() {
 unsecure_remove_file() {
   rm -f $1
   if [[ $? -eq 0 ]]; then
-    echo "${YEL}$(tput bold)CLEANUP${RST}: rm of $1 complete - ${RED}$(tput bold)WARNING${RST} decrypted" \
+    echo "${YEL}${BLD}CLEANUP${RST}: rm of $1 complete - ${RED}${BLD}WARNING${RST} decrypted" \
       "archive may still be recoverable!"
   else
-    echo "${YEL}$(tput bold)CLEANUP${RST} ${RED}$(tput bold)FAIL${RST}: rm failed!"
+    echo "${YEL}${BLD}CLEANUP${RST} ${RED}${BLD}FAIL${RST}: rm failed!"
     # TODO: what else can be done, just warn harder? why might this fail?
     exit 1
   fi
