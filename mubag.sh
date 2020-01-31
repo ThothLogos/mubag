@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # TODO: Complete --edit/-e functionality using extract functionality
+# TODO: --remove
+# TODO: --print needs to check presence before failure
 # TODO: Trap CTRL-C to attempt cleanups there as well
 # TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
@@ -34,7 +36,7 @@ OPTIONS:
   -p FILE, --print FILE         Print contents of FILE to STDOUT, repack
   -e FILE, --edit FILE          Open FILE in $EDITOR for modification, repack
   -x FILE, --extract FILE       Extract a specific FILE from existing archive
-  -r FILE, --replace FILE       Replace a specific FILE within existing archive
+  -u FILE, --update FILE        Update a specific FILE within existing archive
                                   (ie, overwrite keys.txt with a new version)
 
 "
@@ -93,7 +95,7 @@ while [ "$#" -gt 0 ]; do
     -p|--print) prnt=true; FILE="$2"; shift 2;;
     -x|--extract) extract=true; FILE="$2"; shift 2;;
     -e|--edit) edit=true; FILE="$2"; shift 2;;
-    -r|--replace) replace=true; FILE="$2"; shift 2;;
+    -u|--update) update=true; FILE="$2"; shift 2;;
 
     --backup=*) BACKUP="${1#*=}"; shift 1;;
     --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
@@ -101,7 +103,7 @@ while [ "$#" -gt 0 ]; do
     --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
     --extract=*) extract=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
-    --replace=*) replace=true; FILE="${1#*=}"; shift 1;;
+    --update=*) update=true; FILE="${1#*=}"; shift 1;;
     
     -*) echo -e "${RD}${BD}ERROR${RS}: unknown option $1" >&2; display_usage; exit 1;;
     *) handle_argument "$1"; shift 1;;
@@ -124,20 +126,20 @@ main() {
         "a new backup, use -o/--out to specify the output file's name and location."
       exit 1
     else
-      if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: -add FILE $FILE not found!";exit 1;fi
+      if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --add FILE $FILE not found!";exit 1;fi
       create_or_update_archive $FILE $OUTFILE
       encrypt_zip $OUTFILE
       secure_remove_file $OUTFILE
     fi
   elif [ $add ] && [ $backup ];then # update existing archive
-    if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: -add FILE $FILE not found!";exit 1;fi
+    if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --add FILE $FILE not found!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     local ret=$(check_file_existence $FILE $BACKUP)
     if [[ $ret == "0" ]];then
       secure_remove_file $BACKUP
       echo "${RD}${BD}ERROR${RS}: file $FILE already exists inside $BACKUP.gpg, if you want to" \
-        "replace the existing copy inside the archive, use --replace."
+        "update the existing copy inside the archive, use --update."
       exit 1
     fi
     create_or_update_archive $FILE $BACKUP
@@ -147,15 +149,9 @@ main() {
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
     if [[ $? -eq 0 ]];then
-      echo "[${YL}${BD}!!!${RS}] - ${BD}WARNING${RS}: You have just decrypted your backup archive" \
+      echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS}: You have just decrypted your backup archive" \
         "and it is exposed on the file system. Please be aware of the risks!"
     fi
-  elif [ $extract ];then # extract a specific file from the archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to extract from!";exit 1;fi
-    decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
-    extract_file_from_archive $FILE $BACKUP
-    secure_remove_file $BACKUP
   elif [ $list ];then # list contents of existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to list from!";exit 1;fi
     decrypt_zip $BACKUP
@@ -168,9 +164,27 @@ main() {
     BACKUP=${BACKUP%????} # chop off .gpg
     print_file_from_archive $FILE $BACKUP
     secure_remove_file $BACKUP
-  elif [ $replace ];then
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to replace files!";exit 1;fi
-    
+  elif [ $extract ];then # extract a specific file from the archive
+    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to extract from!";exit 1;fi
+    decrypt_zip $BACKUP
+    BACKUP=${BACKUP%????} # chop off .gpg
+    extract_file_from_archive $FILE $BACKUP
+    secure_remove_file $BACKUP
+  elif [ $update ];then
+    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to update files!";exit 1;fi
+    if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --update FILE $FILE not found!";exit 1;fi
+    decrypt_zip $BACKUP
+    BACKUP=${BACKUP%????} # chop off .gpg
+    local ret=$(check_file_existence $FILE $BACKUP)
+    if ! [[ $ret == "0" ]];then
+      secure_remove_file $BACKUP
+      echo "${RD}${BD}ERROR${RS}: $FILE not found in $BACKUP.gpg, can't --update. If you wanted to " \
+        "add that file instead try: $(basename $0) --add $FILE --backup $BACKUP"
+      exit 1
+    fi
+    create_or_update_archive $FILE $BACKUP
+    encrypt_zip $BACKUP
+    secure_remove_file $BACKUP
   elif [ $edit ];then # edit contents of text file within existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
@@ -223,14 +237,14 @@ create_or_update_archive() {
   fi
   zip -urj $unencrypted_zip $FILE # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
-    [ $verbose ] && echo "${GN}${BD}ADD${RS}: archive creation or update successful"
+    [ $verbose ] && echo "${GN}${BD}UPDATE${RS}: archive creation or update successful"
   elif [[ $? -eq 12 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip; fi
-    echo "${GN}${BD}ADD${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?"
+    echo "${GN}${BD}UPDATE${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?"
     exit 1
   else
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip; fi
-    echo "${GN}${BD}ADD${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!"
+    echo "${GN}${BD}UPDATE${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!"
     exit 1
   fi
 }
@@ -265,7 +279,8 @@ decrypt_zip() {
 encrypt_zip() {
   [ $verbose ] && echo "${BL}${BD}ENCRYPT${RS} BEGIN: attempting gpg encrypt"
   local unencrypted_zip=$1
-  if [ $add ];then # user adding file to a backup, we assume user is ok with .gpg file being updated
+  if [[ $add || $update ]];then
+    # --yes during add/update, user is explicitly running a write command already
     gpg -q --yes --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
   else # in other situations we may want to confirm over-writing if it crops up
     gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
