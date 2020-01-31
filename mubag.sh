@@ -1,12 +1,13 @@
 #!/bin/bash
 
-# TODO: Complete --edit/-e functionality using extract functionality
+# TODO: Complete --edit/-e functionality using extract/replace functionality
 # TODO: --remove
 # TODO: --print needs to check presence before failure
 # TODO: Trap CTRL-C to attempt cleanups there as well
 # TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 # TODO: Experiment: pretty sure I have some redundant RST's on the color tags, prob works like NM
+# TODO: Expand --examples, new flags etc
 
 source config.sh
 
@@ -38,6 +39,7 @@ OPTIONS:
   -x FILE, --extract FILE       Extract a specific FILE from existing archive
   -u FILE, --update FILE        Update a specific FILE within existing archive
                                   (ie, overwrite keys.txt with a new version)
+  -r FILE, --remove FILE        Remove a file from an existing archive
 
 "
 }
@@ -96,6 +98,7 @@ while [ "$#" -gt 0 ]; do
     -x|--extract) extract=true; FILE="$2"; shift 2;;
     -e|--edit) edit=true; FILE="$2"; shift 2;;
     -u|--update) update=true; FILE="$2"; shift 2;;
+    -r|--remove) remove=true; FILE="$2"; shift 2;;
 
     --backup=*) BACKUP="${1#*=}"; shift 1;;
     --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
@@ -104,6 +107,7 @@ while [ "$#" -gt 0 ]; do
     --extract=*) extract=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
     --update=*) update=true; FILE="${1#*=}"; shift 1;;
+    --remove=*) update=true; FILE="${1#*=}"; shift 1;;
     
     -*) echo -e "${RD}${BD}ERROR${RS}: unknown option $1" >&2; display_usage; exit 1;;
     *) handle_argument "$1"; shift 1;;
@@ -192,6 +196,9 @@ main() {
     edit_file_from_archive $FILE $BACKUP
     encrypt_zip $BACKUP
     secure_remove_file $BACKUP
+  elif [ $remove ];then # delete a file from an existing archive
+    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to remove from!";exit 1;fi
+    
   fi
 }
 

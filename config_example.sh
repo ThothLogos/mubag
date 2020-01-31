@@ -1,7 +1,7 @@
 EDITOR="nano"
 ALGO="TWOFISH"
 
-DATE=`date "+%Y%m%d"`
+DATE=`date "+%Y%m%d_%H_%M"`
 
 RS=`tput sgr0`
 BK=`tput setaf 0`
