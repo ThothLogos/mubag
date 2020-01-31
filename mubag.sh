@@ -75,7 +75,7 @@ EXAMPLES:
 "
 }
 
-if [ "$#" -lt 1 ]; then
+if [ "$#" -lt 1 ] || [ "$#" -gt 5 ]; then
   echo "${RD}${BD}ERROR${RS}: incorrect number of args"
   display_usage
   exit 1
@@ -148,7 +148,6 @@ main() {
     fi
     create_or_update_archive $FILE $BACKUP
     encrypt_zip $BACKUP
-    secure_remove_file $BACKUP
   elif [ $decrypt ];then # decrypt an existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
@@ -161,19 +160,16 @@ main() {
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     list_archive_contents $BACKUP
-    secure_remove_file $BACKUP
   elif [ $prnt ];then # print contents of file within existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to print from!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     print_file_from_archive $FILE $BACKUP
-    secure_remove_file $BACKUP
   elif [ $extract ];then # extract a specific file from the archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to extract from!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     extract_file_from_archive $FILE $BACKUP
-    secure_remove_file $BACKUP
   elif [ $update ];then
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to update files!";exit 1;fi
     if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --update FILE $FILE not found!";exit 1;fi
@@ -188,17 +184,32 @@ main() {
     fi
     create_or_update_archive $FILE $BACKUP
     encrypt_zip $BACKUP
-    secure_remove_file $BACKUP
   elif [ $edit ];then # edit contents of text file within existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     edit_file_from_archive $FILE $BACKUP
     encrypt_zip $BACKUP
-    secure_remove_file $BACKUP
   elif [ $remove ];then # delete a file from an existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to remove from!";exit 1;fi
-    
+    decrypt_zip $BACKUP
+    BACKUP=${BACKUP%????} # chop off .gpg
+    remove_file_from_archive $FILE $BACKUP
+    encrypt_zip $BACKUP
+  fi
+  if [ $BACKUP ] && [ -f $BACKUP ] && ! [ $decrypt ];then secure_remove_file $BACKUP;fi
+}
+
+remove_file_from_archive() {
+  [ $verbose ] && echo "${RD}REMOVE${RS} BEGIN: attempting to remove $FILE from $2"
+  local unencrypted_zip=$2
+  zip --delete $unencrypted_zip $FILE # this asked for overwrite
+  if ! [[ $? -eq 0 ]];then
+    if ! [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    echo "${RD}REMOVE ${BD}ERROR${RS}: file $FILE not found within $unencrypted_zip, aborting"
+    exit 1
+  else
+    echo "${RD}REMOVE${RS}: success, $FILE removed from archive"
   fi
 }
 
@@ -286,7 +297,7 @@ decrypt_zip() {
 encrypt_zip() {
   [ $verbose ] && echo "${BL}${BD}ENCRYPT${RS} BEGIN: attempting gpg encrypt"
   local unencrypted_zip=$1
-  if [[ $add || $update ]];then
+  if [[ $add || $update || $remove || $edit ]];then
     # --yes during add/update, user is explicitly running a write command already
     gpg -q --yes --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
   else # in other situations we may want to confirm over-writing if it crops up
