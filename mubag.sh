@@ -13,7 +13,7 @@ source config.sh
 
 display_usage() {
   echo -e "
-Usage: $(basename $0) [OPTION] [FILE] ( -o [OUTFILE NAME] || -b [EXISTING BACKUP ARCHIVE] )
+Usage: $(basename $0) [OPTION] [FILE] ( -o [NEW BACKUP] || -b [EXISTING BACKUP] )
 
  * ${YL}${BD}NOTICE${RS}: All options will decrypt and unpack the archive temporarily. The
            decrypted data is exposed on the filesystem for a short amount of
@@ -100,7 +100,7 @@ while [ "$#" -gt 0 ]; do
     -u|--update) update=true; FILE="$2"; shift 2;;
     -r|--remove) remove=true; FILE="$2"; shift 2;;
 
-    --backup=*) BACKUP="${1#*=}"; shift 1;;
+    --backup=*) backup=true; BACKUP="${1#*=}"; shift 1;;
     --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
     --add=*) add=true; FILE="${1#*=}"; shift 1;;
     --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
@@ -120,6 +120,8 @@ if [ $backup ];then
   elif ! [[ $BACKUP == *.gpg ]];then
     echo "${RD}${BD}ERROR${RS}: please specify a --backup FILE that ends in .gpg";exit 1
   fi
+elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
+  echo "${RD}${BD}ERROR${RS}: Cannot complete this operation without --backup specified!"
 fi
 
 main() {
@@ -149,49 +151,42 @@ main() {
     create_or_update_archive $FILE $BACKUP
     encrypt_zip $BACKUP
   elif [ $decrypt ];then # decrypt an existing archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
     if [[ $? -eq 0 ]];then
       echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS}: You have just decrypted your backup archive" \
         "and it is exposed on the file system. Please be aware of the risks!"
     fi
   elif [ $list ];then # list contents of existing archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to list from!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     list_archive_contents $BACKUP
   elif [ $prnt ];then # print contents of file within existing archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to print from!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     print_file_from_archive $FILE $BACKUP
   elif [ $extract ];then # extract a specific file from the archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to extract from!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     extract_file_from_archive $FILE $BACKUP
   elif [ $update ];then
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to update files!";exit 1;fi
     if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: --update FILE $FILE not found!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     local ret=$(check_file_existence $FILE $BACKUP)
     if ! [[ $ret == "0" ]];then
       secure_remove_file $BACKUP
-      echo "${RD}${BD}ERROR${RS}: $FILE not found in $BACKUP.gpg, can't --update. If you wanted to " \
-        "add that file instead try: $(basename $0) --add $FILE --backup $BACKUP"
+      echo "${RD}${BD}ERROR${RS}: $FILE not found in $BACKUP.gpg, can't --update. If you wanted" \
+        "to add that file instead try: $(basename $0) --add $FILE --backup $BACKUP"
       exit 1
     fi
     create_or_update_archive $FILE $BACKUP
     encrypt_zip $BACKUP
   elif [ $edit ];then # edit contents of text file within existing archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     edit_file_from_archive $FILE $BACKUP
     encrypt_zip $BACKUP
   elif [ $remove ];then # delete a file from an existing archive
-    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to remove from!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
     remove_file_from_archive $FILE $BACKUP
