@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# TODO: Complete --decrypt
-# TODO: Complete --extract
 # TODO: Complete --edit/-e functionality using extract functionality
 # TODO: Trap CTRL-C to attempt cleanups there as well
 # TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
@@ -36,6 +34,8 @@ OPTIONS:
   -p FILE, --print FILE         Print contents of FILE to STDOUT, repack
   -e FILE, --edit FILE          Open FILE in $EDITOR for modification, repack
   -x FILE, --extract FILE       Extract a specific FILE from existing archive
+  -r FILE, --replace FILE       Replace a specific FILE within existing archive
+                                  (ie, overwrite keys.txt with a new version)
 
 "
 }
@@ -93,6 +93,7 @@ while [ "$#" -gt 0 ]; do
     -p|--print) prnt=true; FILE="$2"; shift 2;;
     -x|--extract) extract=true; FILE="$2"; shift 2;;
     -e|--edit) edit=true; FILE="$2"; shift 2;;
+    -r|--replace) replace=true; FILE="$2"; shift 2;;
 
     --backup=*) BACKUP="${1#*=}"; shift 1;;
     --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
@@ -100,6 +101,7 @@ while [ "$#" -gt 0 ]; do
     --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
     --extract=*) extract=true; FILE="${1#*=}"; shift 1;;
     --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
+    --replace=*) replace=true; FILE="${1#*=}"; shift 1;;
     
     -*) echo -e "${RD}${BD}ERROR${RS}: unknown option $1" >&2; display_usage; exit 1;;
     *) handle_argument "$1"; shift 1;;
@@ -131,11 +133,29 @@ main() {
     if ! [ -f $FILE ];then echo "${RD}${BD}ERROR${RS}: -add FILE $FILE not found!";exit 1;fi
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
+    local ret=$(check_file_existence $FILE $BACKUP)
+    if [[ $ret == "0" ]];then
+      secure_remove_file $BACKUP
+      echo "${RD}${BD}ERROR${RS}: file $FILE already exists inside $BACKUP.gpg, if you want to" \
+        "replace the existing copy inside the archive, use --replace."
+      exit 1
+    fi
     create_or_update_archive $FILE $BACKUP
     encrypt_zip $BACKUP
     secure_remove_file $BACKUP
   elif [ $decrypt ];then # decrypt an existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
+    decrypt_zip $BACKUP
+    if [[ $? -eq 0 ]];then
+      echo "[${YL}${BD}!!!${RS}] - ${BD}WARNING${RS}: You have just decrypted your backup archive" \
+        "and it is exposed on the file system. Please be aware of the risks!"
+    fi
+  elif [ $extract ];then # extract a specific file from the archive
+    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to extract from!";exit 1;fi
+    decrypt_zip $BACKUP
+    BACKUP=${BACKUP%????} # chop off .gpg
+    extract_file_from_archive $FILE $BACKUP
+    secure_remove_file $BACKUP
   elif [ $list ];then # list contents of existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to list from!";exit 1;fi
     decrypt_zip $BACKUP
@@ -148,6 +168,9 @@ main() {
     BACKUP=${BACKUP%????} # chop off .gpg
     print_file_from_archive $FILE $BACKUP
     secure_remove_file $BACKUP
+  elif [ $replace ];then
+    if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to replace files!";exit 1;fi
+    
   elif [ $edit ];then # edit contents of text file within existing archive
     if ! [ $backup ];then echo "${RD}${BD}ERROR${RS}: must set --backup to edit within!";exit 1;fi
     decrypt_zip $BACKUP
@@ -155,11 +178,31 @@ main() {
     edit_file_from_archive $FILE $BACKUP
     encrypt_zip $BACKUP
     secure_remove_file $BACKUP
-
   fi
 }
 
+check_file_existence() {
+  local unencrypted_zip=$2
+  unzip -v $unencrypted_zip | grep $(basename $FILE) >/dev/null
+  if [[ $? -eq 0 ]];then
+    echo 0
+  else
+    echo 1
+  fi
+}
 
+extract_file_from_archive() {
+  [ $verbose ] && echo "${MG}${BD}EXTRACT${RS} BEGIN: attempting to extract $FILE from $2"
+  local unencrypted_zip=$2
+  unzip -j $unencrypted_zip $FILE
+  if ! [[ $? -eq 0 ]];then
+    if ! [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    echo "${MG}${BD}EXTRACT ${RD}ERROR${RS}: file $FILE not found within $unencrypted_zip, aborting"
+    exit 1
+  else
+    echo "${MG}${BD}EXTRACT${RS}: success, $FILE recovered from archive"
+  fi
+}
 
 edit_file_from_archive() {
   local unencrypted_zip=$2
@@ -180,27 +223,27 @@ create_or_update_archive() {
   fi
   zip -urj $unencrypted_zip $FILE # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
-    [ $verbose ] && echo "${GN}${BD}ADD${RS}: archive creation successful"
+    [ $verbose ] && echo "${GN}${BD}ADD${RS}: archive creation or update successful"
   elif [[ $? -eq 12 ]];then
-    echo "${GN}${BD}ADD${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?"
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip; fi
+    echo "${GN}${BD}ADD${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?"
     exit 1
   else
-    echo "${GN}${BD}ADD${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!"
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip; fi
+    echo "${GN}${BD}ADD${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!"
     exit 1
   fi
 }
 
 print_file_from_archive() {
-  [ $verbose ] && echo "${MG}${BD}PRINT${RS}: routing $FILE to STDOUT from ${BACKUP%????}"
+  [ $verbose ] && echo "${WH}${BD}PRINT${RS}: routing $FILE to STDOUT from ${BACKUP%????}"
   echo "${WH}${BD}--- BEGIN OUTPUT ---${RS}"
   unzip -p ${BACKUP%????} $(basename $FILE)
   echo "${WH}${BD}---  END OUTPUT  ---${RS}"
 }
 
 list_archive_contents() {
-  unzip -l $1
+  unzip -v $1
   if ! [[ $? -eq 0 ]];then
     echo "${RD}${BD}ERROR${RS}: unknown unzip error when attempting --list!"
   fi
@@ -211,23 +254,27 @@ decrypt_zip() {
   local unencrypted_zip=${1%????}
   gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1
   if [[ $? -eq 0 ]]; then
-    echo "${CY}${BD}DECRYPT${RS}: successful"
+    echo "${CY}${BD}DECRYPT${RS}: success, $unencrypted_zip has been restored"
   else
-    echo "${CY}${BD}DECRYPT${RS} ${RD}${BD}FAIL${RS}: gpg decryption error. Exiting,"
     if [[ -f $unencrypted_zip ]]; then secure_remove_file $unencrypted_zip; fi
+    echo "${CY}${BD}DECRYPT${RS} ${RD}${BD}FAIL${RS}: gpg decryption error. Exiting,"
     exit 1
   fi
 }
 
 encrypt_zip() {
-  [ $verbose ] && echo "${BL}${BD}ENCRYPT${RS} BEGIN: attempting gpg encrypt with $ALGO"
+  [ $verbose ] && echo "${BL}${BD}ENCRYPT${RS} BEGIN: attempting gpg encrypt"
   local unencrypted_zip=$1
-  gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
+  if [ $add ];then # user adding file to a backup, we assume user is ok with .gpg file being updated
+    gpg -q --yes --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
+  else # in other situations we may want to confirm over-writing if it crops up
+    gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
+  fi
   if [[ $? -eq 0 ]]; then
-    echo "${BL}${BD}ENCRYPT${RS}: successful"
+    echo "${BL}${BD}ENCRYPT${RS}: success, $unencrypted_zip.gpg protected by $ALGO"
   else
-    echo "${BL}${BD}ENCRYPT${RS} ${RD}${BD}ERROR${RS}: gpg encryption error. Exiting,"
     if [[ -f $unencrypted_zip ]]; then secure_remove_file $unencrypted_zip; fi
+    echo "${BL}${BD}ENCRYPT${RS} ${RD}${BD}ERROR${RS}: gpg encryption error! Exiting."
     exit 1
   fi
 }
