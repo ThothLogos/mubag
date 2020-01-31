@@ -8,6 +8,7 @@
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 # TODO: Experiment: pretty sure I have some redundant RST's on the color tags, prob works like NM
 # TODO: Expand --examples, new flags etc
+# TODO: --output should check for existing
 
 source config.sh
 
@@ -121,11 +122,11 @@ if [ $backup ];then
     echo "${RD}${BD}ERROR${RS}: please specify a --backup FILE that ends in .gpg";exit 1
   fi
 elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
-  echo "${RD}${BD}ERROR${RS}: Cannot complete this operation without --backup specified!"
+  echo "${RD}${BD}ERROR${RS}: Cannot complete this operation without --backup specified!";exit 1
 fi
 
 if [[ $add || $update ]] && [[ ! $FILE || ! -f $FILE ]];then
-  echo "${RD}${BD}ERROR${RS}: The file targeted for add/update ($FILE) not found!"
+  echo "${RD}${BD}ERROR${RS}: The file targeted for add/update ($FILE) not found!";exit 1
 fi
 
 main() {
@@ -137,32 +138,25 @@ main() {
     if ! [ $out ];then
       echo "${RD}${BD}ERROR${RS}: --add requires either --backup FILE or --out FILE specified," \
         "if you're trying to update an existing backup use -b/--backup, if you're trying to start" \
-        "a new backup, use -o/--out to specify the output file's name and location."
-      exit 1
+        "a new backup, use -o/--out to specify the output file's name and location.";exit 1
     else
       create_or_update_archive $FILE $OUTFILE
       encrypt_zip $OUTFILE
       secure_remove_file $OUTFILE
     fi
   elif [ $add ] && [ $backup ];then # update existing archive
-    local ret=$(check_file_existence $FILE $BACKUP)
-    if [[ $ret == "0" ]];then
+    if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
       secure_remove_file $BACKUP
       echo "${RD}${BD}ERROR${RS}: file $FILE already exists inside $BACKUP.gpg, if you want to" \
-        "update the existing copy inside the archive, use --update."
-      exit 1
+        "update the existing copy inside the archive, use --update.";exit 1
     fi
     create_or_update_archive $FILE $BACKUP
-    encrypt_zip $BACKUP
-  elif [ $decrypt ];then # decrypt an existing archive
+  elif [ $decrypt ];then
     decrypt_zip $BACKUP
     if [[ $? -eq 0 ]];then
       echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS}: You have just decrypted your backup archive" \
         "and it is exposed on the file system. Please be aware of the risks!"
     fi
-  elif [ $list ];then list_archive_contents $BACKUP
-  elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
-  elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
   elif [ $update ];then
     local ret=$(check_file_existence $FILE $BACKUP)
     if ! [[ $ret == "0" ]];then
@@ -172,18 +166,14 @@ main() {
       exit 1
     fi
     create_or_update_archive $FILE $BACKUP
-    encrypt_zip $BACKUP
-  elif [ $edit ];then # edit contents of text file within existing archive
-    edit_file_from_archive $FILE $BACKUP
-    encrypt_zip $BACKUP
-  elif [ $remove ];then # delete a file from an existing archive
-    remove_file_from_archive $FILE $BACKUP
-    encrypt_zip $BACKUP
+  elif [ $list ];then list_archive_contents $BACKUP
+  elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
+  elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
+  elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
+  elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
-  if [ $backup ] && [ -f $BACKUP ] && ! [ $decrypt ];then
-    encrypt_zip $BACKUP
-    secure_remove_file $BACKUP
-  fi
+  if [[ $update||$edit||$remove ]] || [[ $add && $backup ]]; then encrypt_zip $BACKUP;fi
+  if [ $backup ] && [ -f $BACKUP ] && ! [ $decrypt ];then secure_remove_file $BACKUP;fi
 }
 
 remove_file_from_archive() {
