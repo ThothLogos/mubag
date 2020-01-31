@@ -1,8 +1,7 @@
 EDITOR="nano"
-DATADIR=""
-ZIPNAME=""
-ZIPLOC="$DATADIR/$ZIPNAME"
 ALGO="TWOFISH"
+
+DATE=`date "+%Y%m%d"`
 
 RST=`tput sgr0`
 BLK=`tput setaf 0`
