@@ -9,6 +9,7 @@
 # TODO: Experiment: pretty sure I have some redundant RST's on the color tags, prob works like NM
 # TODO: Expand --examples, new flags etc
 # TODO: --output should check for existing
+# TODO: When replacing or updating, can unzip -l | grep | awk to compare date and hashes
 
 source config.sh
 
@@ -88,18 +89,26 @@ while [ "$#" -gt 0 ]; do
     -ex|--examples) display_examples; exit 0;;
     -v|--verbose) verbose=true; shift 1;; 
 
-    -b|--backup) backup=true;BACKUP="$2"; shift 2;;
-    -o|--out) out=true; OUTFILE="$2"; shift 2;;
+    -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
+              else echo "${RD}${BD}ERROR${RS}: --backup missing FILE!";exit 1;fi;;
+    -o|--out) out=true; if [ $# -gt 1 ];then OUTFILE="$2";shift 2
+              else echo "${RD}${BD}ERROR${RS}: --out missing FILE!";exit 1;fi;;
 
     -l|--list) list=true; shift 1;;
     -d|--decrypt) decrypt=true; shift 1;;
 
-    -a|--add) add=true; FILE="$2"; shift 2;;
-    -p|--print) prnt=true; FILE="$2"; shift 2;;
-    -x|--extract) extract=true; FILE="$2"; shift 2;;
-    -e|--edit) edit=true; FILE="$2"; shift 2;;
-    -u|--update) update=true; FILE="$2"; shift 2;;
-    -r|--remove) remove=true; FILE="$2"; shift 2;;
+    -a|--add) add=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+              else echo "${RD}${BD}ERROR${RS}: --add missing FILE!";exit 1;fi;;
+    -p|--print) prnt=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+              else echo "${RD}${BD}ERROR${RS}: --print missing FILE!";exit 1;fi;;
+    -x|--extract) extract=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+              else echo "${RD}${BD}ERROR${RS}: --extract missing FILE!";exit 1;fi;;
+    -e|--edit) edit=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+              else echo "${RD}${BD}ERROR${RS}: --edit missing FILE!";exit 1;fi;;
+    -u|--update) update=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+              else echo "${RD}${BD}ERROR${RS}: --update missing FILE!";exit 1;fi;;
+    -r|--remove) remove=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+              else echo "${RD}${BD}ERROR${RS}: --remove missing FILE!";exit 1;fi;;
 
     --backup=*) backup=true; BACKUP="${1#*=}"; shift 1;;
     --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
@@ -218,28 +227,29 @@ edit_file_from_archive() {
 
 create_or_update_archive() {
   local unencrypted_zip=$2
-  if [ $out ] && [[ $OUTFILE == "" ]];then
-    unencrypted_zip=$DATE.zip
-    OUTFILE=$DATE.zip
-    echo "${GN}${BD}ADD${RS}: --out was blank! using timestamp as default: $OUTFILE"
+  if [ $out ];then
+    if [[ $OUTFILE == "" || -d $OUTFILE ]];then
+      if [ -d $OUTFILE ] && ! [ $OUTFILE == */ ];then OUTFILE="$OUTFILE/";fi
+      unencrypted_zip="${OUTFILE}${DATE}.zip"
+      OUTFILE="${OUTFILE}${DATE}.zip"
+    fi
+    echo "${GN}${BD}ADD${RS}: --out was blank or resolves to a directory, defaulting to datestamp" \
+      "for filename: $OUTFILE"
   fi
   if [ $OUTFILE ] && [ -f $OUTFILE ];then
-    echo "${RD}${BD}ERROR${RS}: --out $OUTFILE would over-write an existing file! If you want" \
-      "to update an existing backup, use --backup instead of --out. Otherwise, pick a different" \
-      "file location/name or remove the blocking file manually and re-run. Oopsie prevention."
-    exit 1
+    echo "${RD}${BD}ERROR${RS}: --out $OUTFILE would over-write an existing file! If you want to" \
+      "update an existing backup, use --backup instead of --out. Otherwise, pick a different file" \
+      "location/name or remove the blocking file manually and re-run. Oopsie prevention.";exit 1
   fi
   zip -urj $unencrypted_zip $FILE # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
     [ $verbose ] && echo "${GN}${BD}UPDATE${RS}: archive creation or update successful"
   elif [[ $? -eq 12 ]];then
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip; fi
-    echo "${GN}${BD}UPDATE${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?"
-    exit 1
+    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    echo "${GN}${BD}UPDATE${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?";exit 1
   else
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip; fi
-    echo "${GN}${BD}UPDATE${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!"
-    exit 1
+    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    echo "${GN}${BD}UPDATE${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!";exit 1
   fi
 }
 
