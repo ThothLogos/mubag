@@ -124,10 +124,10 @@ done
 
 if [ $backup ];then
   if ! [ -f $BACKUP ];then
-    echo "${RD}${BD}ERROR${RS}: the --backup FILE you specified cannot be found"
+    echo "${RD}${BD}ERROR${RS}: The --backup FILE you specified cannot be found"
     exit 1
   elif ! [[ $BACKUP == *.gpg ]];then
-    echo "${RD}${BD}ERROR${RS}: please specify a --backup FILE that ends in .gpg"
+    echo "${RD}${BD}ERROR${RS}: Please specify a --backup FILE that ends in .gpg"
     exit 1
   fi
 elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
@@ -158,7 +158,7 @@ main() {
   elif [ $add ] && [ $backup ];then # update existing archive
     if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
       secure_remove_file $BACKUP
-      echo "${RD}${BD}ERROR${RS}: file $FILE already exists inside $BACKUP.gpg, if you want to" \
+      echo "${RD}${BD}ERROR${RS}: File $FILE already exists inside $BACKUP.gpg, if you want to" \
         "update the existing copy inside the archive, use --update.";exit 1
     fi
     create_or_update_archive $FILE $BACKUP
@@ -175,11 +175,7 @@ main() {
         "to add that file instead try: $(basename $0) --add $FILE --backup $BACKUP";exit 1
     fi
     create_or_update_archive $FILE $BACKUP
-  elif [ $prnt ];then
-    if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
-      echo "${RD}${BD}ERROR${RS}: $FILE not found in $BACKUP.gpg, can't --print!";exit 1
-    fi
-    print_file_from_archive $FILE $BACKUP
+  elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
   elif [ $list ];then list_archive_contents $BACKUP
   elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
   elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
@@ -190,15 +186,15 @@ main() {
 }
 
 remove_file_from_archive() {
-  [ $verbose ] && echo "${RD}REMOVE${RS} BEGIN: attempting to remove $FILE from $2"
+  [ $verbose ] && echo "${RD}REMOVE${RS}: Attempting to remove $FILE from $2"
   local unencrypted_zip=$2
   zip --delete $unencrypted_zip $FILE # this asked for overwrite
   if ! [[ $? -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    echo "${RD}REMOVE ${BD}ERROR${RS}: file $FILE not found within $unencrypted_zip, aborting"
+    echo "${RD}REMOVE ${BD}ERROR${RS}: File $FILE not found within $unencrypted_zip, aborting"
     exit 1
   else
-    echo "${RD}REMOVE${RS}: success, $FILE removed from archive"
+    echo "${RD}REMOVE${RS}: ${GN}Success${RS}, $FILE removed from archive"
   fi
 }
 
@@ -213,20 +209,16 @@ check_file_existence() {
 }
 
 extract_file_from_archive() {
-  [ $verbose ] && echo "${MG}${BD}EXTRACT${RS} BEGIN: attempting to extract $FILE from $2"
+  [ $verbose ] && echo "${CY}EXTRACT${RS}: Attempting to extract $FILE from $2"
   local unencrypted_zip=$2
   unzip -j $unencrypted_zip $FILE
   if ! [[ $? -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    echo "${MG}${BD}EXTRACT ${RD}ERROR${RS}: file $FILE not found within $unencrypted_zip, aborting"
+    echo "${CY}EXTRACT ${RD}${BD}ERROR${RS}: File $FILE not found within $unencrypted_zip, aborting"
     exit 1
   else
-    echo "${MG}${BD}EXTRACT${RS}: success, $FILE recovered from archive"
+    echo "${CY}EXTRACT${RS}: ${GN}Success${RS}, $FILE recovered from archive $unencrypted_zip"
   fi
-}
-
-edit_file_from_archive() {
-  local unencrypted_zip=$2
 }
 
 create_or_update_archive() {
@@ -248,20 +240,21 @@ create_or_update_archive() {
   fi
   zip -urj $unencrypted_zip $FILE # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
-    [ $verbose ] && echo "${GN}${BD}UPDATE${RS}: archive creation or update successful"
+    [ $verbose ] && echo "${GN}${BD}ADD${RS}: ${GN}Success${RS}, archive creation/update complete"
   elif [[ $? -eq 12 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    echo "${GN}${BD}UPDATE${RS} ${YL}${BD}NO-OP${RS}: zip update failed 'nothing to do'?"
-    exit 1
+    echo "${GN}${BD}UPDATE ${YL}NO-OP${RS}: zip update failed 'nothing to do'?"
   else
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    echo "${GN}${BD}UPDATE${RS} ${RD}${BD}ERROR${RS}: unknown zip creation or update error!"
-    exit 1
+    echo "${GN}${BD}UPDATE ${RD}ERROR${RS}: unknown zip creation or update error!"
   fi
 }
 
 print_file_from_archive() {
   [ $verbose ] && echo "${WH}${BD}PRINT${RS}: routing $FILE to STDOUT from ${BACKUP%????}"
+  if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
+    echo "${RD}${BD}ERROR${RS}: $FILE not found in $BACKUP.gpg, can't --print!";exit 1
+  fi
   echo "${WH}${BD}--- BEGIN OUTPUT ---${RS}"
   unzip -p ${BACKUP%????} $(basename $FILE)
   echo "${WH}${BD}---  END OUTPUT  ---${RS}"
@@ -274,21 +267,52 @@ list_archive_contents() {
   fi
 }
 
+edit_file_from_archive() {
+  local unencrypted_zip=$2
+  if ! [[ $(check_file_existence $FILE $unencrypted_zip) ]];then
+    echo "${RD}${BD}ERROR${RS}: --edit failed, $FILE doesn't exist in the archive!"
+    exit 1
+  fi
+  extract_file_from_archive $FILE $unencrypted_zip
+  if command -v $EDITOR >/dev/null;then
+    [ $verbose ] && echo "${MG}${BD}EDIT${RS}: Attempting to launch editor: $EDITOR"
+    $EDITOR $FILE
+  else
+    echo "${MG}${BD}EDIT${RS}: Couldn't find editor \"$EDITOR\", launching with nano"
+    EDITOR=nano
+    $EDITOR $FILE
+  fi
+  if [[ $? -eq 0 ]];then
+    # check_file_changed() conditional ?
+    create_or_update_archive $FILE $unencrypted_zip
+  else
+    echo "${RD}${BD}ERROR${RS}: Editor \"$EDITOR\" exited with a non-zero status ($?)! Cleaning up exposed files."
+    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    if [ -f $FILE ];then secure_remove_file $FILE;fi
+    exit 1
+  fi
+  if [ -f $FILE ];then secure_remove_file $FILE;fi
+}
+
+get_file_modified_unix() {
+  
+}
+
 decrypt_zip() {
-  [ $verbose ] && echo "${CY}${BD}DECRYPT${RS} BEGIN: attempting gpg decrypt"
+  [ $verbose ] && echo "${CY}${BD}DECRYPT${RS}: Attempting gpg decrypt"
   local unencrypted_zip=${1%????}
   gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1
   if [[ $? -eq 0 ]]; then
-    echo "${CY}${BD}DECRYPT${RS}: success, $unencrypted_zip has been restored"
+    echo "${CY}${BD}DECRYPT${RS}: ${GN}Success${RS}, $unencrypted_zip has been restored"
   else
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    echo "${CY}${BD}DECRYPT${RS} ${RD}${BD}FAIL${RS}: gpg decryption error. Exiting."
+    echo "${CY}${BD}DECRYPT ${RD}${BD}FAIL${RS}: gpg decryption error. Exiting."
     exit 1
   fi
 }
 
 encrypt_zip() {
-  [ $verbose ] && echo "${BL}${BD}ENCRYPT${RS} BEGIN: attempting gpg encrypt"
+  [ $verbose ] && echo "${BL}${BD}ENCRYPT${RS}: Attempting gpg encrypt"
   local unencrypted_zip=$1
   if [[ $add || $update || $remove || $edit ]];then
     # --yes during add/update, user is explicitly running a write command already
@@ -297,50 +321,38 @@ encrypt_zip() {
     gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
   fi
   if [[ $? -eq 0 ]];then
-    echo "${BL}${BD}ENCRYPT${RS}: success, $unencrypted_zip.gpg protected by $ALGO"
+    echo "${BL}${BD}ENCRYPT${RS}: ${GN}Success${RS}, $unencrypted_zip.gpg protected by $ALGO"
   else
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    echo "${BL}${BD}ENCRYPT${RS} ${RD}${BD}ERROR${RS}: gpg encryption error! Exiting."
+    echo "${BL}${BD}ENCRYPT ${RD}ERROR${RS}: gpg encryption error! Exiting."
     exit 1
   fi
 }
 
 secure_remove_file() {
-  local finished=false
+  local secure_removal_cmd=""
   if command -v srm >/dev/null;then
-    [ $verbose ] && echo "${YL}${BD}CLEANUP${RS}: srm exists on system, target $1"
-    srm -zv $1 # -z zero-out, -v verbose (srm can be slow, shows progress)
-    if [[ $? -eq 0 ]]; then
-      echo "${YL}${BD}CLEANUP${RS}: success, srm complete - $1 securely purged"
-      finished=true
-    else
-      echo "${YL}${BD}CLEANUP${RS} ${RD}${BD}FAIL${RS}: srm failed!"
-    fi
+    secure_removal_cmd="srm -zv $1"
+  elif command -v shred >/dev/null;then
+    secure_removal_cmd="shred -uz $1"
   fi
-  if command -v shred >/dev/null && ! $finished ;then
-    [ $verbose ] && echo "${YL}${BD}CLEANUP${RS}: shred exists on system, shredding $1"
-    shred -uz $1 # -u delete file, -z zero-out
-    if [[ $? -eq 0 ]];then
-      echo "${YL}${BD}CLEANUP${RS}: success, shred complete - $1 securely purged"
-      finished=true
-    else
-      echo "${YL}${BD}CLEANUP${RS} ${RD}${BD}FAIL${RS}: shred failed!"
-    fi
-  fi
-  if ! $finished ;then # resort to rm'ing
-    echo "${YL}${BD}CLEANUP${RS} ${RD}FALLBACK${RS}: secure file erasure not found, resorting to rm"
+  if ! [[ secure_removal_cmd == "" ]];then
+    $secure_removal_cmd
+    if [[ $? -eq 0 ]];then echo "${YL}CLEANUP${RS}: ${GN}Success${RS}, $1 purged securely via: $secure_removal_cmd";fi
+  else
+    echo "${YL}CLEANUP${RS}: Secure file removal not found on system, resorting to using rm"
     unsecure_remove_file $1
   fi
+
 }
 
 unsecure_remove_file() {
   rm -f $1
   if [[ $? -eq 0 ]]; then
-    echo "${YL}${BD}CLEANUP${RS}: rm of $1 complete - ${RD}${BD}WARNING${RS} decrypted" \
+    echo "${YL}CLEANUP${RS}: rm of $1 complete - ${RD}${BD}WARNING${RS} decrypted" \
       "archive may still be recoverable!"
   else
-    echo "${YL}${BD}CLEANUP${RS} ${RD}${BD}FAIL${RS}: rm failed!"
-    # TODO: what else can be done, just warn harder? why might this fail?
+    echo "${YL}CLEANUP ${RD}${BD}FAIL${RS}: File removal with rm failed!"
     exit 1
   fi
 }
