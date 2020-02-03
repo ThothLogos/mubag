@@ -4,8 +4,6 @@
 # TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 # TODO: Expand --examples, new flags etc
-# TODO: When replacing or updating, can unzip -l | grep | awk to compare date and hashes
-# TODO: Updating a file that hasn't changed, causes zip error, cascasdes to encryption error
 
 source config.sh
 
@@ -173,8 +171,21 @@ main() {
       secure_remove_file $BACKUP
       err_echo "$FILE not found in $BACKUP.gpg, can't --update. If you want to add that" \
         "file instead try: $(basename $0) --add $FILE --backup $BACKUP";exit 1
+    else
+      mv $FILE $FILE.temp
+      unzip -j $BACKUP $FILE
+      if [[ $(checksum $FILE) == $(checksum $FILE.temp) ]];then
+        add_update_echo "The file $FILE in the archive is identical to the one you've targeted." \
+          "No changes were made, cleaning up."
+        secure_remove_file $FILE
+        mv $FILE.temp $FILE
+        secure_remove_file $BACKUP
+        exit 1
+      fi
+      secure_remove_file $FILE
+      mv $FILE.temp $FILE
+      create_or_update_archive $FILE $BACKUP
     fi
-    create_or_update_archive $FILE $BACKUP
   elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
   elif [ $list ];then list_archive_contents $BACKUP
   elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
@@ -275,7 +286,6 @@ edit_file_from_archive() {
     exit 1
   fi
   extract_file_from_archive $FILE $unencrypted_zip
-  local pre_edit_modtime=$(date -r $FILE +%s) # get file's modified time in unix seconds
   if command -v $EDITOR >/dev/null;then
     [ $verbose ] && edit_echo "Attempting to launch editor: $EDITOR"
     $EDITOR $FILE
@@ -285,12 +295,7 @@ edit_file_from_archive() {
     $EDITOR $FILE
   fi
   if [[ $? -eq 0 ]];then
-    local post_edit_modtime=$(date -r $FILE +%s)
-    if [[ $(( $post_edit_modtime - $pre_edit_modtime )) -gt 0 ]];then # file was modified
-      create_or_update_archive $FILE $unencrypted_zip
-    else # file modification times matched
-      edit_echo "[${YL}NO-OP${RS}] Edited file $FILE appears unmodified, no changes made to $BACKUP"
-    fi
+    create_or_update_archive $FILE $unencrypted_zip
   else
     err_echo "Editor \"$EDITOR\" exited with a non-zero status! ($?) Cleaning up exposed files."
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
@@ -365,6 +370,10 @@ unsecure_remove_file() {
     err_echo "File removal with rm failed! (Somehow?? You figure this one out.)"
     exit 1
   fi
+}
+
+checksum() {
+  echo $(sha256sum $1 | cut -f1 -d ' ')
 }
 
 add_update_echo() { echo "[${GN}${BD}!${RS}] ${GN}${BD}ADD${RS}${BD}/${GN}UPDATE${RS}: $*"; }
