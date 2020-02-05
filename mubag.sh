@@ -237,14 +237,13 @@ extract_file_from_archive() {
 
 create_or_update_archive() {
   local unencrypted_zip=$2
-  if [ $out ];then
-    if [[ $OUTFILE == "" || -d $OUTFILE ]];then
-      if [ -d $OUTFILE ] && ! [ $OUTFILE == */ ];then OUTFILE="$OUTFILE/";fi
-      unencrypted_zip="${OUTFILE}${DATE}.zip"
-      OUTFILE="${OUTFILE}${DATE}.zip"
-    fi
+  if [ $out ] && [[ $OUTFILE == "" || -d $OUTFILE ]];then
+    if [ -d $OUTFILE ] && ! [ $OUTFILE == */ ];then OUTFILE="$OUTFILE/";fi
+    unencrypted_zip="${OUTFILE}${DATE}.zip"
+    OUTFILE="${OUTFILE}${DATE}.zip"
     add_update_echo "--out was blank or resolves to a directory, defaulting to datestamp" \
       "for filename: $OUTFILE"
+    fi
   fi
   if [ $OUTFILE ] && [ -f $OUTFILE ];then
     err_echo "Doing --out $OUTFILE would over-write an existing file! If you want to" \
