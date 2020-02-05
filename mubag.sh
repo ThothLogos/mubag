@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # TODO: Trap CTRL-C to attempt cleanups there as well
-# TODO: (?) Perhaps offer option to bail out of rm'ing and let them handle secure deletion manually?
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 # TODO: Expand --examples, new flags etc
 
+trap trap_cleanup SIGINT SIGTERM
 source config.sh
 
 display_usage() {
@@ -126,6 +126,9 @@ if [ $backup ];then
     exit 1
   elif ! [[ $BACKUP == *.gpg ]];then
     err_echo "Please specify a --backup FILE that ends in .gpg"
+    exit 1
+  elif ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
+    err_echo "Do what with --backup $BACKUP? You must select an operation to perform, see --help."
     exit 1
   fi
 elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
@@ -374,6 +377,12 @@ unsecure_remove_file() {
 
 checksum() {
   echo $(sha256sum $1 | cut -f1 -d ' ')
+}
+
+trap_cleanup() {
+  if [[ $backup && -f ${BACKUP%????} && ! $decrypt ]];then secure_remove_file ${BACKUP%????};fi
+  if [[ $prnt || $edit ]] && [[ -f $FILE ]];then secure_remove_file $FILE;fi
+  exit 1
 }
 
 add_update_echo() { echo "[${GN}${BD}!${RS}] ${GN}${BD}ADD${RS}${BD}/${GN}UPDATE${RS}: $*"; }
