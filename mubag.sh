@@ -1,8 +1,6 @@
 #!/bin/bash
 
-# TODO: Trap CTRL-C to attempt cleanups there as well
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
-# TODO: Expand --examples, new flags etc
 
 trap trap_cleanup SIGINT SIGTERM
 source config.sh
@@ -46,28 +44,32 @@ EXAMPLES:
 
   Create a new encrypted archive, use any file:
 
-    $(basename $0) --add=backup.txt
-    $(basename $0) -a dirtypic.png
+    $(basename $0) --add=secret.txt --out=backup.zip
+    $(basename $0) -o backup.zip -a dirtypic.png
 
-  List contents of existing encrypted archive:
+  List contents or print specific files from encrypted archive:
 
-    $(basename $0) --list --backup=/home/user/backup.zip.gpg
-    $(basename $0) -l -b /home/user/backup.zip.gpg
+    $(basename $0) --backup=/home/user/backup.zip.gpg --list
+    $(basename $0) -b /home/user/backup.zip.gpg --print ntt.log
 
-  Add new file to existing encrypted archive:
+  Add new or update existing file within encrypted archive:
 
-    $(basename $0) --add=qr_code.jpg --backup=/home/user/backup.zip.gpg
-    $(basename $0) -a latest.log -b /home/user/backup.zip.gpg
+    $(basename $0) -b /home/user/backup.zip.gpg --update latest.log
+    $(basename $0) --backup /home/user/backup.zip.gpg --add=qr_code.jpg
 
-  Print contents of file inside an encrypted archive to STDOUT:
+  Extract or remove a file inside an encrypted archive:
 
-    $(basename $0) --print secrets.txt -b /home/user/backup.zip.gpg
-    $(basename $0) -p recovery_key --backup=/home/user/backup.zip.gpg
+    $(basename $0) -b /home/user/backup.zip.gpg --extract secrets.txt
+    $(basename $0) --backup /home/user/backup.zip.gpg --remove recovery_key
 
   Edit existing file inside an encrypted archive:
 
     $(basename $0) --edit 2fa.bak -b /home/user/backup.zip.gpg
-    $(basename $0) -e rosebud.conf --backup=/home/user/backup.zip.gpg
+    $(basename $0) --backup=/home/user/backup.zip.gpg -e rosebud.conf
+
+  (${YL}${BD}WARNING${RS})Decrypt all contents:
+
+    $(basename $0) -b /home/user/backup.zip.gpg --decrypt
 "
 }
 
@@ -304,7 +306,7 @@ edit_file_from_archive() {
     if [ -f $FILE ];then secure_remove_file $FILE;fi
     exit 1
   fi
-  if [ -f $FILE ];then secure_remove_file $FILE;fi # cleanup the file we edited, we're done with it
+  if [ -f $FILE ];then secure_remove_file $FILE;fi
 }
 
 decrypt_zip() {
