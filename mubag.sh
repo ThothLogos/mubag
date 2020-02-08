@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# TODO: Add --algo to forward options to gpg's --cipher-algo, use ALGO config for default
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 
 trap trap_cleanup SIGINT SIGTERM
@@ -20,6 +21,7 @@ OPTIONS:
   -h, --help                    This screen
   -ex, --examples               Print examples of usage
   -v, --verbose                 Increase output to assist in debugging
+  -s, --skip-logging            Disable updating of the archive log file
 
   -b FILE, --backup FILE        Specify existing encrypted archive to use
   -o FILE, --out FILE           Specify dir/name of output file for new archive
@@ -67,13 +69,11 @@ EXAMPLES:
     $(basename $0) --edit 2fa.bak -b /home/user/backup.zip.gpg
     $(basename $0) --backup=/home/user/backup.zip.gpg -e rosebud.conf
 
-  (${YL}${BD}WARNING${RS})Decrypt all contents:
+  [${YL}${BD}WARNING${RS}] Decrypt all contents:
 
     $(basename $0) -b /home/user/backup.zip.gpg --decrypt
 "
 }
-
-err_echo() { echo "[${RD}${BD}!!!${RS}] ${RD}${BD}ERROR${RS} [${RD}${BD}!!!${RS}] - $*"; }
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 5 ]; then
   err_echo "Incorrect number of args, see --help:"
@@ -84,8 +84,9 @@ fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help) display_usage; exit 0;;
-    -ex|--examples) display_examples; exit 0;;
-    -v|--verbose) verbose=true; shift 1;; 
+    -ex|--examples|--example) display_examples; exit 0;;
+    -v|--verbose) verbose=true; shift 1;;
+    -s|--skip-logging|--skip-log|--skip|--skiplog) skiplog=true; shift 1;;
 
     -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
               else err_echo "--backup missing FILE!";exit 1;fi;;
@@ -147,6 +148,7 @@ main() {
   if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup ]];then
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
+    if ! [ $skiplog ];then extract_logfile $LOG $BACKUP ;fi
   fi
   if [ $add ] && ! [ $backup ]; then # create new archive
     if ! [ $out ];then
@@ -197,19 +199,27 @@ main() {
   elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
   elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
+  if ! [ $skiplog ];then
+    if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
+    zip -urj $LOG $BACKUP
+    if [[ $? -eq 0 ]];then log_echo "Archive log successfully updated";fi
+    if [ -f $LOG ]];then secure_remove_file $LOG;fi
+  fi
   if [[ $update||$edit||$remove ]] || [[ $add && $backup ]]; then encrypt_zip $BACKUP;fi
   if [[ $backup && -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
 }
 
 remove_file_from_archive() {
-  [ $verbose ] && remove_echo "Attempting to remove $FILE from $2"
   local unencrypted_zip=$2
-  zip --delete $unencrypted_zip $FILE # this asked for overwrite
+  [ $verbose ] && remove_echo "Attempting to remove $FILE from $unencrypted_zip"
+  zip --delete $unencrypted_zip $FILE
   if ! [[ $? -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    ! [ $skiplog ] && remove_log "Removal of $FILE failed, does not exist in $unencrypted_zip"
     err_echo "File $FILE not found within $unencrypted_zip, aborting"
     exit 1
   else
+    ! [ $skiplog ] && remove_log "Removal of $FILE from $unencrypted_zip was successful"
     remove_echo "Success, $FILE removed from archive"
   fi
 }
@@ -224,15 +234,28 @@ check_file_existence() {
   fi
 }
 
-extract_file_from_archive() {
-  [ $verbose ] && extract_echo "Attempting to extract $FILE from $2"
+extract_logfile() {
   local unencrypted_zip=$2
+  [ $verbose ] && log_echo "Attempting to extract activity.log from $unencrypted_zip"
+  if [[ $(check_file_existence $LOG $unencrypted_zip) -eq 0 ]];then
+    unzip -j $unencrypted_zip $LOG
+  else
+    [ $verbose ] && log_echo "No activity.log present in this archive, one will be created"
+  fi
+  
+}
+
+extract_file_from_archive() {
+  local unencrypted_zip=$2
+  [ $verbose ] && extract_echo "Attempting to extract $FILE from $unencrypted_zip"
   unzip -j $unencrypted_zip $FILE
   if ! [[ $? -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    ! [ $skiplog ] && extract_log "Extraction of $FILE failed, does not exist in $unencrypted_zip"
     err_echo "File $FILE not found within $unencrypted_zip, aborting"
     exit 1
   else
+    ! [ $skiplog ] && extract_log "Extraction of $FILE from $unencrypted_zip was successful"
     extract_echo "Success, $FILE recovered from archive $unencrypted_zip"
   fi
 }
@@ -245,7 +268,6 @@ create_or_update_archive() {
     OUTFILE="${OUTFILE}${DATE}.zip"
     add_update_echo "--out was blank or resolves to a directory, defaulting to datestamp" \
       "for filename: $OUTFILE"
-    fi
   fi
   if [ $OUTFILE ] && [ -f $OUTFILE ];then
     err_echo "Doing --out $OUTFILE would over-write an existing file! If you want to" \
@@ -255,6 +277,7 @@ create_or_update_archive() {
   fi
   zip -urj $unencrypted_zip $FILE # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
+    ! [ $skiplog ] && add_update_log "File $FILE was added or updated within $unencrypted_zip"
     add_update_echo "Success, archive creation/update complete"
   elif [[ $? -eq 12 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
@@ -267,14 +290,15 @@ create_or_update_archive() {
 
 print_file_from_archive() {
   local unencrypted_zip=$2
-  [ $verbose ] && print_echo "Attempting to route $FILE to STDOUT from ${BACKUP%????}"
+  [ $verbose ] && print_echo "Attempting to route $FILE to STDOUT from $unencrypted_zip"
   if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     err_echo "$FILE not found in $BACKUP.gpg, can't --print!"
     exit 1
   fi
+  ! [ $skiplog ] && print_log "$FILE was successfully routed to STDOUT from $unencrypted_zip"
   echo "${WH}${BD}--- BEGIN OUTPUT ---${RS}"
-  unzip -p ${BACKUP%????} $(basename $FILE)
+  unzip -p $unencrypted_zip $(basename $FILE)
   echo "${WH}${BD}---  END OUTPUT  ---${RS}"
 }
 
@@ -290,6 +314,7 @@ edit_file_from_archive() {
     exit 1
   fi
   extract_file_from_archive $FILE $unencrypted_zip
+  filehash_orig=$(checksum $FILE)
   if command -v $EDITOR >/dev/null;then
     [ $verbose ] && edit_echo "Attempting to launch editor: $EDITOR"
     $EDITOR $FILE
@@ -299,7 +324,14 @@ edit_file_from_archive() {
     $EDITOR $FILE
   fi
   if [[ $? -eq 0 ]];then
-    create_or_update_archive $FILE $unencrypted_zip
+    filehash_new=$(checksum $FILE)
+    if [[ filehash_orig == filehash_new ]];then
+      ! [ $skiplog ] && edit_log "$FILE was opened in an editor but no changes were made"
+      edit_echo "$FILE was left unchanged, archive will remain unchanged, cleaning up"
+    else
+      ! [ $skiplog ] && edit_log "$FILE was opened in an editor and successfully modified"
+      create_or_update_archive $FILE $unencrypted_zip
+    fi
   else
     err_echo "Editor \"$EDITOR\" exited with a non-zero status! ($?) Cleaning up exposed files."
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
@@ -315,6 +347,7 @@ decrypt_zip() {
   local exit_msg
   exit_msg="$(gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1 2>&1)"
   if [[ $? -eq 0 ]]; then
+    ! [ $skiplog ] && decrypt_log "Archive $unencrypted_zip.gpg successfully decrypted"
     decrypt_echo "Success, $unencrypted_zip has been restored"
   elif [[ $(echo "$exit_msg" | grep "Bad session key") ]];then
     err_echo "GPG decryption failed due to incorrect passphrase! Exiting."
@@ -330,6 +363,7 @@ decrypt_zip() {
 encrypt_zip() {
   [ $verbose ] && encrypt_echo "Attempting gpg encrypt"
   local unencrypted_zip=$1
+  ! [ $skiplog ] && encrypt_log "Encrypting $unencrypted_zip"
   if [[ $add || $update || $remove || $edit ]];then
     # --yes during add/update, user is explicitly running a write command already
     gpg -q --yes --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
@@ -337,6 +371,7 @@ encrypt_zip() {
     gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
   fi
   if [[ $? -eq 0 ]];then
+    ! [ $skiplog ] && encrypt_log "$unencrypted_zip.gpg successfully protected with $ALGO"
     encrypt_echo "Success, $unencrypted_zip.gpg protected by $ALGO"
   else
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
@@ -353,9 +388,10 @@ secure_remove_file() {
     secure_removal_cmd="shred -uz $1"
   fi
   if ! [[ secure_removal_cmd == "" ]];then
-    $secure_removal_cmd
+    $cmd # execute the removal
     if [[ $? -eq 0 ]];then
-      cleanup_echo "Success, $1 purged securely via: $secure_removal_cmd"
+      ! [ $skiplog ] && ! [[ $1 == $LOG ]] && cleanup_log "$1 securely erased with: $cmd"
+      cleanup_echo "Success, $1 purged securely via: $cmd"
     else
       cleanup_echo "${RD}FALLBACK${RS}: Secure file removal failed! Resorting to using rm"
       unsecure_remove_file $1
@@ -369,6 +405,8 @@ secure_remove_file() {
 unsecure_remove_file() {
   rm -f $1
   if [[ $? -eq 0 ]]; then
+    ! [ $skiplog ] && ! [[ $1 == $LOG ]] && cleanup_log "No secure removal found, $1" \
+      "removed via: $cmd"
     cleanup_echo "Success, rm of $1 complete"
   else
     err_echo "File removal with rm failed! (Somehow?? You figure this one out.)"
@@ -386,15 +424,35 @@ trap_cleanup() {
   exit 1
 }
 
+append_to_activity_log() {
+  datestamp=$(date "+%Y-%m-%d %H:%M:%S")
+  if ! [[ $skiplog ]];then
+    echo "$datestamp $1" >> activity.log
+  else
+    [ $verbose ] && log_echo "Skipping log update due to --skip-logging"
+  fi
+}
+
+add_update_log()  { append_to_activity_log "ADD/UPDATE: $*"; }
+remove_log()      { append_to_activity_log "REMOVE: $*";     }
+edit_log()        { append_to_activity_log "EDIT: $*";       }
+extract_log()     { append_to_activity_log "EXTRACT: $*";    }
+print_log()       { append_to_activity_log "PRINT: $*";      }
+encrypt_log()     { append_to_activity_log "ENCRYPT: $*";    }
+decrypt_log()     { append_to_activity_log "DECRYPT: $*";    }
+cleanup_log()     { append_to_activity_log "CLEANUP: $*";    }
+
 add_update_echo() { echo "[${GN}${BD}!${RS}] ${GN}${BD}ADD${RS}${BD}/${GN}UPDATE${RS}: $*"; }
 remove_echo()     { echo "[${RD}${BD}!${RS}] ${RD}REMOVE${RS}: $*"; }
-edit_echo()       { echo "    ${MG}EDIT${RS}: $*"; }
-extract_echo()    { echo "    ${CY}EXTRACT${RS}: $*"; }
+edit_echo()       { echo "    ${MG}EDIT${RS}: $*";       }
+extract_echo()    { echo "    ${CY}EXTRACT${RS}: $*";    }
 print_echo()      { echo "    ${WH}${BD}PRINT${RS}: $*"; }
 encrypt_echo()    { echo "[${CY}${BD}!${RS}] ${BL}${BD}ENCRYPT${RS}: $*"; }
 decrypt_echo()    { echo "[${CY}${BD}!${RS}] ${CY}${BD}DECRYPT${RS}: $*"; }
 cleanup_echo()    { echo "[${YL}${BD}!${RS}] ${YL}${BD}CLEANUP${RS}: $*"; }
-warn_echo()       { echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS} [${YL}${BD}!!!${RS}] - $*"; }
+warn_echo()       { echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS} [${YL}${BD}!!!${RS}] - $*";    }
+err_echo()        { echo "[${RD}${BD}!!!${RS}] ${RD}${BD}ERROR${RS} [${RD}${BD}!!!${RS}] - $*"; }
+log_echo()        { echo "${BD}LOGGING${RS}: $*"; }
 
 main
 exit 0
