@@ -80,7 +80,6 @@ main() {
   if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup ]];then
     decrypt_zip $BACKUP
     BACKUP=${BACKUP%????} # chop off .gpg
-    if ! [ $skiplog ];then extract_logfile $LOG $BACKUP ;fi
   fi
   if [ $add ] && ! [ $backup ]; then # create new archive
     if ! [ $out ];then
@@ -89,8 +88,6 @@ main() {
         "a new backup, use -o/--out.";exit 1
     else
       create_or_update_archive $FILE $OUTFILE
-      encrypt_zip $OUTFILE
-      secure_remove_file $OUTFILE
     fi
   elif [ $add ] && [ $backup ];then # update existing archive
     if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
@@ -131,14 +128,9 @@ main() {
   elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
   elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
-  if ! [ $skiplog ];then
-    if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
-    zip -urj $BACKUP $LOG
-    if [[ $? -eq 0 ]];then log_echo "Archive log successfully updated";fi
-    if [ -f $LOG ];then secure_remove_file $LOG;fi
-  fi
-  if [[ $update||$edit||$remove ]] || [[ $add && $backup ]]; then encrypt_zip $BACKUP;fi
-  if [[ $backup && -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
+  if [[ $add||$update||$edit||$remove ]]; then encrypt_zip $BACKUP;fi
+  if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
 }
 
 parse_and_setup(){
@@ -189,6 +181,7 @@ parse_and_setup(){
       *) handle_argument "$1"; shift 1;;
     esac
   done
+  LOG_DISABLED=false
 }
 
 sanity_checks() {
@@ -231,7 +224,7 @@ remove_file_from_archive() {
 
 check_file_existence() {
   local unencrypted_zip=$2
-  unzip -v $unencrypted_zip | grep $(basename $FILE) >/dev/null
+  unzip -v $unencrypted_zip | grep $(basename $1) >/dev/null
   if [[ $? -eq 0 ]];then
     echo 0
   else
@@ -266,6 +259,7 @@ extract_file_from_archive() {
 }
 
 create_or_update_archive() {
+  local file=$1
   local unencrypted_zip=$2
   if [ $out ] && [[ $OUTFILE == "" || -d $OUTFILE ]];then
     if [ -d $OUTFILE ] && ! [ $OUTFILE == */ ];then OUTFILE="$OUTFILE/";fi
@@ -280,9 +274,11 @@ create_or_update_archive() {
       "location/name or remove the blocking file manually and re-run. Oopsie prevention."
     exit 1
   fi
-  zip -urj $unencrypted_zip $FILE # -rj abandon directory structure of files added
+  zip -urj $unencrypted_zip $file # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
-    ! [ $skiplog ] && add_update_log "File $FILE was added or updated within $unencrypted_zip"
+    if ! [ $skiplog ];then # && ! [[ "$file" == "$LOG" ]];then 
+      add_update_log "File $file was added or updated within $unencrypted_zip"
+    fi
     add_update_echo "Success, archive creation/update complete"
   elif [[ $? -eq 12 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
@@ -356,8 +352,15 @@ decrypt_zip() {
     exit_msg="$(gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1 2>&1)"
   fi
   if [[ $? -eq 0 ]]; then
-    ! [ $skiplog ] && decrypt_log "Archive $unencrypted_zip.gpg successfully decrypted"
     decrypt_echo "Success, $unencrypted_zip has been restored"
+    if ! [ $skiplog ];then
+      extract_logfile $LOG $unencrypted_zip && decrypt_log "Archive $unencrypted_zip.gpg" \
+        "successfully decrypted"
+      if ! [[ $? -eq 0 ]];then
+        err_echo "Failed to extract and update $LOG from $unencrypted_zip!"
+        exit 1
+      fi
+    fi
   elif [[ $(echo "$exit_msg" | grep "Bad session key") ]];then
     err_echo "GPG decryption failed due to incorrect passphrase! Exiting."
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
@@ -372,7 +375,16 @@ decrypt_zip() {
 encrypt_zip() {
   [ $verbose ] && encrypt_echo "Attempting gpg encrypt"
   local unencrypted_zip=$1
-  ! [ $skiplog ] && encrypt_log "Encrypting $unencrypted_zip"
+  if ! [ $skiplog ];then
+    encrypt_log "Encrypting $unencrypted_zip"
+    local msg=$(zip -urj $BACKUP $LOG)
+    if [[ $? -eq 0 ]];then
+      log_echo "Archive log successfully updated"
+    else
+      warn_echo "Archive log exited $?, message: $msg"
+    fi
+    if [ -f $LOG ];then secure_remove_file $LOG;fi
+  fi
   if [[ $test ]];then
     gpg -q --batch --yes --passphrase $testpass --cipher-algo $ALGO --symmetric $unencrypted_zip
   elif [[ $add || $update || $remove || $edit ]];then
@@ -382,8 +394,8 @@ encrypt_zip() {
     gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
   fi
   if [[ $? -eq 0 ]];then
-    ! [ $skiplog ] && encrypt_log "$unencrypted_zip.gpg successfully protected with $ALGO"
     encrypt_echo "Success, $unencrypted_zip.gpg protected by $ALGO"
+    LOG_DISABLED=true
   else
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     err_echo "GPG encryption error! Exiting."
@@ -398,10 +410,12 @@ secure_remove_file() {
   elif command -v shred >/dev/null;then
     cmd="shred -uz $1"
   fi
-  if ! [[ secure_removal_cmd == "" ]];then
+  if ! [[ cmd == "" ]];then
     $cmd # execute the removal
     if [[ $? -eq 0 ]];then
-      ! [ $skiplog ] && ! [[ $1 == $LOG ]] && cleanup_log "$1 securely erased with: $cmd"
+      if ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
+        cleanup_log "$1 securely erased with: $cmd"
+      fi
       cleanup_echo "Success, $1 purged securely via: $cmd"
     else
       cleanup_echo "${RD}FALLBACK${RS}: Secure file removal failed! Resorting to using rm"
@@ -439,6 +453,7 @@ append_to_activity_log() {
   datestamp=$(date "+%Y-%m-%d %H:%M:%S")
   if ! [[ $skiplog ]];then
     echo "$datestamp $1" >> activity.log
+    echo "${BD}DEBUGLOG${RS} $datestamp $1"
   else
     [ $verbose ] && log_echo "Skipping log update due to --skip-logging"
   fi
