@@ -2,6 +2,7 @@
 
 # TODO: Add --algo to forward options to gpg's --cipher-algo, use ALGO config for default
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
+# TODO: Should log be nested so we can track failures? ie, a wrapper zip containing unencrypted log?
 
 trap trap_cleanup SIGINT SIGTERM
 source config.sh
@@ -75,75 +76,6 @@ EXAMPLES:
 "
 }
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 5 ]; then
-  err_echo "Incorrect number of args, see --help:"
-  display_usage
-  exit 1
-fi
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -h|--help) display_usage; exit 0;;
-    -ex|--examples|--example) display_examples; exit 0;;
-    -v|--verbose) verbose=true; shift 1;;
-    -s|--skip-logging|--skip-log|--skip|--skiplog) skiplog=true; shift 1;;
-
-    -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
-              else err_echo "--backup missing FILE!";exit 1;fi;;
-    -o|--out) out=true; if [ $# -gt 1 ];then OUTFILE="$2";shift 2
-              else err_echo "--out missing FILE!";exit 1;fi;;
-
-    -l|--list) list=true; shift 1;;
-    -d|--decrypt) decrypt=true; shift 1;;
-
-    -a|--add) add=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
-              else err_echo "--add missing FILE!";exit 1;fi;;
-    -p|--print) prnt=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
-              else err_echo "--print missing FILE!";exit 1;fi;;
-    -x|--extract) extract=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
-              else err_echo "--extract missing FILE!";exit 1;fi;;
-    -e|--edit) edit=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
-              else err_echo "--edit missing FILE!";exit 1;fi;;
-    -u|--update) update=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
-              else err_echo "--update missing FILE!";exit 1;fi;;
-    -r|--remove) remove=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
-              else err_echo "--remove missing FILE!";exit 1;fi;;
-
-    --backup=*) backup=true; BACKUP="${1#*=}"; shift 1;;
-    --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
-    --add=*) add=true; FILE="${1#*=}"; shift 1;;
-    --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
-    --extract=*) extract=true; FILE="${1#*=}"; shift 1;;
-    --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
-    --update=*) update=true; FILE="${1#*=}"; shift 1;;
-    --remove=*) remove=true; FILE="${1#*=}"; shift 1;;
-    
-    -*) err_echo "Unknown option $1" >&2; display_usage; exit 1;;
-    *) handle_argument "$1"; shift 1;;
-  esac
-done
-
-if [ $backup ];then
-  if ! [ -f $BACKUP ];then
-    err_echo "The --backup FILE you specified cannot be found"
-    exit 1
-  elif ! [[ $BACKUP == *.gpg ]];then
-    err_echo "Please specify a --backup FILE that ends in .gpg"
-    exit 1
-  elif ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
-    err_echo "Do what with --backup $BACKUP? You must select an operation to perform, see --help."
-    exit 1
-  fi
-elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
-  err_echo "Cannot complete this operation without --backup specified!"
-  exit 1
-fi
-
-if [[ $add || $update ]] && [[ ! $FILE || ! -f $FILE ]];then
-  err_echo "The file targeted for add/update ($FILE) not found!"
-  exit 1
-fi
-
 main() {
   if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup ]];then
     decrypt_zip $BACKUP
@@ -203,10 +135,83 @@ main() {
     if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
     zip -urj $LOG $BACKUP
     if [[ $? -eq 0 ]];then log_echo "Archive log successfully updated";fi
-    if [ -f $LOG ]];then secure_remove_file $LOG;fi
+    if [ -f $LOG ];then secure_remove_file $LOG;fi
   fi
   if [[ $update||$edit||$remove ]] || [[ $add && $backup ]]; then encrypt_zip $BACKUP;fi
   if [[ $backup && -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+}
+
+parse_and_setup(){
+  if [ "$#" -lt 1 ] || [ "$#" -gt 20 ]; then
+    err_echo "Incorrect number of args, see --help:"
+    display_usage
+    exit 1
+  fi
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help) display_usage; exit 0;;
+      -ex|--examples|--example) display_examples; exit 0;;
+      -v|--verbose) verbose=true; shift 1;;
+      -s|--skip-logging|--skip-log|--skip|--skiplog) skiplog=true; shift 1;;
+      -l|--list) list=true; shift 1;;
+      -d|--decrypt) decrypt=true; shift 1;;
+
+      -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
+                else err_echo "--backup missing FILE!";exit 1;fi;;
+      -o|--out) out=true; if [ $# -gt 1 ];then OUTFILE="$2";shift 2
+                else err_echo "--out missing FILE!";exit 1;fi;;
+      -t|--test) test=true; if [ $# -gt 1 ];then testpass="$2"; shift 2
+                else err_echo "--test requires a PASSPHRASE passed with it to automate!";exit 1;fi;;
+      -a|--add) add=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+                else err_echo "--add missing FILE!";exit 1;fi;;
+      -p|--print) prnt=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+                else err_echo "--print missing FILE!";exit 1;fi;;
+      -x|--extract) extract=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+                else err_echo "--extract missing FILE!";exit 1;fi;;
+      -e|--edit) edit=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+                else err_echo "--edit missing FILE!";exit 1;fi;;
+      -u|--update) update=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+                else err_echo "--update missing FILE!";exit 1;fi;;
+      -r|--remove) remove=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
+                else err_echo "--remove missing FILE!";exit 1;fi;;
+
+      --test=*) test=true; testpass="${1#*=}"; shift 1;;
+      --backup=*) backup=true; BACKUP="${1#*=}"; shift 1;;
+      --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
+      --add=*) add=true; FILE="${1#*=}"; shift 1;;
+      --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
+      --extract=*) extract=true; FILE="${1#*=}"; shift 1;;
+      --edit=*) edit=true; FILE="${1#*=}"; shift 1;;
+      --update=*) update=true; FILE="${1#*=}"; shift 1;;
+      --remove=*) remove=true; FILE="${1#*=}"; shift 1;;
+
+      -*) err_echo "Unknown option $1" >&2; display_usage; exit 1;;
+      *) handle_argument "$1"; shift 1;;
+    esac
+  done
+}
+
+sanity_checks() {
+  if [ $backup ];then
+    if ! [ -f $BACKUP ];then
+      err_echo "The --backup FILE you specified cannot be found"
+      exit 1
+    elif ! [[ $BACKUP == *.gpg ]];then
+      err_echo "Please specify a --backup FILE that ends in .gpg"
+      exit 1
+    elif ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
+      err_echo "Do what with --backup $BACKUP? You must select an operation to perform, see --help."
+      exit 1
+    fi
+  elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
+    err_echo "Cannot complete this operation without --backup specified!"
+    exit 1
+  fi
+
+  if [[ $add || $update ]] && [[ ! $FILE || ! -f $FILE ]];then
+    err_echo "The file targeted for add/update ($FILE) not found!"
+    exit 1
+  fi
 }
 
 remove_file_from_archive() {
@@ -364,7 +369,9 @@ encrypt_zip() {
   [ $verbose ] && encrypt_echo "Attempting gpg encrypt"
   local unencrypted_zip=$1
   ! [ $skiplog ] && encrypt_log "Encrypting $unencrypted_zip"
-  if [[ $add || $update || $remove || $edit ]];then
+  if [[ $test ]];then
+    gpg -q --batch --yes --passphrase $testpass --cipher-algo $ALGO --symmetric $unencrypted_zip
+  elif [[ $add || $update || $remove || $edit ]];then
     # --yes during add/update, user is explicitly running a write command already
     gpg -q --yes --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
   else # in other situations we may want to confirm over-writing if it crops up
@@ -381,11 +388,11 @@ encrypt_zip() {
 }
 
 secure_remove_file() {
-  local secure_removal_cmd=""
+  local cmd=""
   if command -v srm >/dev/null;then
-    secure_removal_cmd="srm -zv $1"
+    cmd="srm -zv $1"
   elif command -v shred >/dev/null;then
-    secure_removal_cmd="shred -uz $1"
+    cmd="shred -uz $1"
   fi
   if ! [[ secure_removal_cmd == "" ]];then
     $cmd # execute the removal
@@ -454,5 +461,7 @@ warn_echo()       { echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS} [${YL}${BD}!!!$
 err_echo()        { echo "[${RD}${BD}!!!${RS}] ${RD}${BD}ERROR${RS} [${RD}${BD}!!!${RS}] - $*"; }
 log_echo()        { echo "${BD}LOGGING${RS}: $*"; }
 
+parse_and_setup $*
+sanity_checks
 main
 exit 0
