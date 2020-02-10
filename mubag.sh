@@ -133,7 +133,7 @@ main() {
   fi
   if ! [ $skiplog ];then
     if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
-    zip -urj $LOG $BACKUP
+    zip -urj $BACKUP $LOG
     if [[ $? -eq 0 ]];then log_echo "Archive log successfully updated";fi
     if [ -f $LOG ];then secure_remove_file $LOG;fi
   fi
@@ -142,7 +142,7 @@ main() {
 }
 
 parse_and_setup(){
-  if [ "$#" -lt 1 ] || [ "$#" -gt 20 ]; then
+  if [ "$#" -lt 1 ] || [ "$#" -gt 8 ]; then
     err_echo "Incorrect number of args, see --help:"
     display_usage
     exit 1
@@ -350,7 +350,11 @@ decrypt_zip() {
   [ $verbose ] && decrypt_echo "Attempting gpg decrypt"
   local unencrypted_zip=${1%????}
   local exit_msg
-  exit_msg="$(gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1 2>&1)"
+  if [[ $test ]];then
+    exit_msg="$(gpg -q --batch --yes --passphrase $testpass -o $unencrypted_zip --decrypt $1 2>&1)"
+  else
+    exit_msg="$(gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1 2>&1)"
+  fi
   if [[ $? -eq 0 ]]; then
     ! [ $skiplog ] && decrypt_log "Archive $unencrypted_zip.gpg successfully decrypted"
     decrypt_echo "Success, $unencrypted_zip has been restored"
