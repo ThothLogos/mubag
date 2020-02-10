@@ -26,7 +26,7 @@ setup() {
   for c in {A..C};do
     local size=$(( 4096 + RANDOM % 4096 ))
     generate_text_file "$c.txt" $size
-    if ! [[ $? -eq 0 ]];then err_echo "Unable to generate test files, aborting.";fi
+    if ! [[ $? -eq 0 ]];then err_echo "Unable to generate test files, aborting.";shutdown;exit 1;fi
   done
   ok_echo
   popd > /dev/null
@@ -47,8 +47,8 @@ generate_text_file() {
 do_test() {
   local testname=$1
   test_echo $testname
-  $testname
-  if [[ $? -eq 0 ]];then
+  local ret=$($testname)
+  if [[ $ret == "0" ]];then
     ok_echo
   else
     fail_echo
@@ -57,56 +57,75 @@ do_test() {
 }
 
 test_create_new_archive() {
-  ./mubag.sh -v --test $TESTPASS -o $TESTDIR/test.zip -a $TESTDIR/A.txt >/dev/null
+  local match="archive creation/update complete"
+  local out=$(./mubag.sh -v --test $TESTPASS -o $TESTDIR/test.zip -a $TESTDIR/A.txt)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_add_files_to_archive() {
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -a $TESTDIR/B.txt >/dev/null
-  ./mubag.sh -v --test $TESTPASS --backup=$TESTDIR/test.zip.gpg --add=$TESTDIR/C.txt >/dev/null
+  local passing=false
+  local match="archive creation/update complete"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -a $TESTDIR/B.txt)
+  if [[ $out =~ $match ]];then passing=true;else echo "1";fi
+  local out=$(./mubag.sh -v --test $TESTPASS --backup=$TESTDIR/test.zip.gpg --add=$TESTDIR/C.txt)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_list_files_in_archive() {
-  ./mubag.sh -v --test $TESTPASS --backup $TESTDIR/test.zip.gpg --list >/dev/null
+  local match="CRC-32"
+  local out=$(./mubag.sh -v --test $TESTPASS --backup $TESTDIR/test.zip.gpg --list)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_print_file_from_archive() {
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p A.txt >/dev/null
+  local match="END OUTPUT"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p A.txt 2>&1)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_extract_file_from_archive() {
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x B.txt >/dev/null
-  rm B.txt
+  local match="recovered from archive"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x B.txt 2>&1)
+  if [ -f B.txt ];then rm B.txt;fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_edit_file_within_archive() {
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -e C.txt >/dev/null
+  local match="archive creation/update complete"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -e C.txt)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_failure_updating_unchanged_file() {
   ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x A.txt >/dev/null
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt >/dev/null
-  rm A.txt
-  if ! [[ $? -eq 0 ]];then echo 0 >/dev/null;fi # Invert non-zero exit, we want failure to pass
+  local match="The file A.txt in the archive is identical"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt 2>&1)
+  if [ -f A.txt ];then rm A.txt;fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_update_file_within_archive() {
   ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x A.txt >/dev/null
   echo "Ch-ch-ch-ch-changes" >> A.txt
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt >/dev/null
-  rm A.txt
+  local match="archive creation/update complete"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt 2>&1)
+  if [ -f A.txt ];then rm A.txt;fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_remove_file_from_archive() {
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -r B.txt >/dev/null
+  local match="B.txt removed from archive"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -r B.txt 2>&1)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_failure_to_find_file_in_archive() {
-  # attempt to print a non-existing file, expect failure
-  ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p DNE.void >/dev/null
-  if ! [[ $? -eq 0 ]];then echo 0 >/dev/null;fi # Invert non-zero exit, we want failure to pass
+  local match="DNE.void not found in"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p DNE.void 2>&1)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
-test_echo()     { echo -ne "[${YL}TEST${RS}] Running \"$1\" ... "; }
+test_echo()     { echo -ne "[${YL}TEST${RS}] Running $1 ... "; }
 setup_echo()    { echo -ne "$*"; }
 shutdown_echo() { echo "$*"; }
 warn_echo()     { echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS} [${YL}${BD}!!!${RS}] - $*";    }
@@ -115,8 +134,5 @@ ok_echo()       { echo "${GN}OK${RS}"; }
 fail_echo()     { echo "${RD}${BD}FAIL${RS}"; }
 
 main
-exit 0
-
-
-
+exit 0;
 
