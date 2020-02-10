@@ -131,7 +131,7 @@ main() {
   elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
   if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
-  if ! [ $decrypt ] || ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
+  if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
   if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
 }
 
@@ -218,7 +218,7 @@ remove_file_from_archive() {
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     ! [ $skiplog ] && remove_log "Removal of $FILE failed, does not exist in $unencrypted_zip"
     err_echo "File $FILE not found within $unencrypted_zip, aborting"
-    exit 1
+    err_exit
   else
     ! [ $skiplog ] && remove_log "Removal of $FILE from $unencrypted_zip was successful"
     remove_echo "Success, $FILE removed from archive"
@@ -253,10 +253,9 @@ extract_file_from_archive() {
   [ $verbose ] && extract_echo "Attempting to extract $file from $unencrypted_zip"
   unzip -j $unencrypted_zip $file
   if ! [[ $? -eq 0 ]];then
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     ! [ $skiplog ] && extract_log "Extraction of $file failed, does not exist in $unencrypted_zip"
     err_echo "File $file not found within $unencrypted_zip, aborting"
-    exit 1
+    err_exit
   else
     ! [ $skiplog ] && extract_log "Extraction of $file from $unencrypted_zip was successful"
     extract_echo "Success, $file recovered from archive $unencrypted_zip"
@@ -286,11 +285,11 @@ create_or_update_archive() {
     fi
     add_update_echo "Success, archive creation/update complete"
   elif [[ $? -eq 12 ]];then
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     add_update_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
+    err_exit
   else
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     err_echo "Unknown zip creation or update error!"
+    err_exit
   fi
 }
 
@@ -299,14 +298,13 @@ print_file_from_archive() {
   local unencrypted_zip=$2
   [ $verbose ] && print_echo "Attempting to route $file to STDOUT from $unencrypted_zip"
   if ! [[ $(check_file_existence $file $BACKUP) -eq 0 ]];then
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
     err_echo "$file not found in $BACKUP.gpg, can't --print!"
-    exit 1
+    err_exit
   fi
-  ! [ $skiplog ] && print_log "$file was successfully routed to STDOUT from $unencrypted_zip"
   echo "${WH}${BD}--- BEGIN OUTPUT ---${RS}"
   unzip -p $unencrypted_zip $(basename $file)
   echo "${WH}${BD}---  END OUTPUT  ---${RS}"
+  ! [ $skiplog ] && print_log "$file was successfully routed to STDOUT from $unencrypted_zip"
 }
 
 list_archive_contents() {
@@ -473,6 +471,13 @@ append_to_activity_log() {
   else
     [ $verbose ] && log_echo "Skipping log update due to --skip-logging"
   fi
+}
+
+err_exit() {
+  if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
+  if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
+  if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  exit 1
 }
 
 add_update_log()  { append_to_activity_log "ADD/UPDATE   $*"; }
