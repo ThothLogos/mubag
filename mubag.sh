@@ -109,19 +109,20 @@ main() {
       err_echo "$FILE not found in $BACKUP.gpg, can't --update. If you want to add that" \
         "file instead try: $(basename $0) --add $FILE --backup $BACKUP";exit 1
     else
+      ! [ $skiplog ] && add_update_log "Attempting to update $FILE within $BACKUP"
       mv $FILE $FILE.temp
       unzip -j $BACKUP $FILE
       if [[ $(checksum $FILE) == $(checksum $FILE.temp) ]];then
         add_update_echo "The file $FILE in the archive is identical to the one you've targeted." \
           "No changes were made, cleaning up."
+        ! [ $skiplog ] && add_update_log "[NO-OP] Update failed, no changes"
         secure_remove_file $FILE
         mv $FILE.temp $FILE
-        secure_remove_file $BACKUP
-        exit 1
+      else
+        secure_remove_file $FILE
+        mv $FILE.temp $FILE
+        create_or_update_archive $FILE $BACKUP
       fi
-      secure_remove_file $FILE
-      mv $FILE.temp $FILE
-      create_or_update_archive $FILE $BACKUP
     fi
   elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
   elif [ $list ];then list_archive_contents $BACKUP
@@ -130,12 +131,12 @@ main() {
   elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
   if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
-  if [[ $extract||$prnt||$list||$add||$update||$edit||$remove ]]; then encrypt_zip $BACKUP;fi
+  if ! [ $decrypt ] || ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
   if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
 }
 
 parse_and_setup(){
-  if [ "$#" -lt 1 ] || [ "$#" -gt 8 ]; then
+  if [ "$#" -lt 1 ] || [ "$#" -gt 9 ]; then
     err_echo "Incorrect number of args, see --help:"
     display_usage
     exit 1
@@ -148,6 +149,7 @@ parse_and_setup(){
       -s|--skip-logging|--skip-log|--skip|--skiplog) skiplog=true; shift 1;;
       -l|--list) list=true; shift 1;;
       -d|--decrypt) decrypt=true; shift 1;;
+      -ne|--no-encrypt) preventencrypt=true; shift 1;;
 
       -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
                 else err_echo "--backup missing FILE!";exit 1;fi;;
@@ -224,8 +226,9 @@ remove_file_from_archive() {
 }
 
 check_file_existence() {
+  local file=$1
   local unencrypted_zip=$2
-  unzip -v $unencrypted_zip | grep $(basename $1) >/dev/null
+  unzip -v $unencrypted_zip | grep $(basename $file) >/dev/null
   if [[ $? -eq 0 ]];then
     echo 0
   else
@@ -387,14 +390,17 @@ encrypt_zip() {
   local unencrypted_zip=$1
   if ! [ $skiplog ];then
     encrypt_log "Encrypting $unencrypted_zip"
-    local msg=$(zip -urj $BACKUP $LOG)
-    sleep 0.1
+    local msg=$(zip -urj $unencrypted_zip $LOG)
     if [[ $? -eq 0 ]];then
-      log_echo "Archive log successfully updated"
+      sleep 0.1
+      log_echo "Archive log successfully updated within $unencrypted_zip"
+      if [ -f $LOG ];then secure_remove_file $LOG;fi
     else
       warn_echo "Archive log exited $?, message: $msg"
+      if [ -f $LOG ];then secure_remove_file $LOG;fi
+      if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+      exit 1
     fi
-    if [ -f $LOG ];then secure_remove_file $LOG;fi
   fi
   if [[ $test ]];then
     gpg -q --batch --yes --passphrase $testpass --cipher-algo $ALGO --symmetric $unencrypted_zip
@@ -464,7 +470,6 @@ append_to_activity_log() {
   datestamp=$(date "+%Y-%m-%d %H:%M:%S")
   if ! [[ $skiplog ]];then
     echo "$datestamp $1" >> activity.log
-    echo "${BD}DEBUGLOG${RS} $datestamp $1"
   else
     [ $verbose ] && log_echo "Skipping log update due to --skip-logging"
   fi
