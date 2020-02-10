@@ -3,6 +3,7 @@
 # TODO: Add --algo to forward options to gpg's --cipher-algo, use ALGO config for default
 # TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 # TODO: Should log be nested so we can track failures? ie, a wrapper zip containing unencrypted log?
+# TODO: Add user to activity log
 
 trap trap_cleanup SIGINT SIGTERM
 source config.sh
@@ -129,7 +130,7 @@ main() {
   elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
   if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
-  if [[ $add||$update||$edit||$remove ]]; then encrypt_zip $BACKUP;fi
+  if [[ $extract||$prnt||$list||$add||$update||$edit||$remove ]]; then encrypt_zip $BACKUP;fi
   if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
 }
 
@@ -244,17 +245,18 @@ extract_logfile() {
 }
 
 extract_file_from_archive() {
+  local file=$1
   local unencrypted_zip=$2
-  [ $verbose ] && extract_echo "Attempting to extract $FILE from $unencrypted_zip"
-  unzip -j $unencrypted_zip $FILE
+  [ $verbose ] && extract_echo "Attempting to extract $file from $unencrypted_zip"
+  unzip -j $unencrypted_zip $file
   if ! [[ $? -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    ! [ $skiplog ] && extract_log "Extraction of $FILE failed, does not exist in $unencrypted_zip"
-    err_echo "File $FILE not found within $unencrypted_zip, aborting"
+    ! [ $skiplog ] && extract_log "Extraction of $file failed, does not exist in $unencrypted_zip"
+    err_echo "File $file not found within $unencrypted_zip, aborting"
     exit 1
   else
-    ! [ $skiplog ] && extract_log "Extraction of $FILE from $unencrypted_zip was successful"
-    extract_echo "Success, $FILE recovered from archive $unencrypted_zip"
+    ! [ $skiplog ] && extract_log "Extraction of $file from $unencrypted_zip was successful"
+    extract_echo "Success, $file recovered from archive $unencrypted_zip"
   fi
 }
 
@@ -290,56 +292,64 @@ create_or_update_archive() {
 }
 
 print_file_from_archive() {
+  local file=$1
   local unencrypted_zip=$2
-  [ $verbose ] && print_echo "Attempting to route $FILE to STDOUT from $unencrypted_zip"
-  if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
+  [ $verbose ] && print_echo "Attempting to route $file to STDOUT from $unencrypted_zip"
+  if ! [[ $(check_file_existence $file $BACKUP) -eq 0 ]];then
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    err_echo "$FILE not found in $BACKUP.gpg, can't --print!"
+    err_echo "$file not found in $BACKUP.gpg, can't --print!"
     exit 1
   fi
-  ! [ $skiplog ] && print_log "$FILE was successfully routed to STDOUT from $unencrypted_zip"
+  ! [ $skiplog ] && print_log "$file was successfully routed to STDOUT from $unencrypted_zip"
   echo "${WH}${BD}--- BEGIN OUTPUT ---${RS}"
-  unzip -p $unencrypted_zip $(basename $FILE)
+  unzip -p $unencrypted_zip $(basename $file)
   echo "${WH}${BD}---  END OUTPUT  ---${RS}"
 }
 
 list_archive_contents() {
-  unzip -v $1
+  local unencrypted_zip=$1
+  unzip -v $unencrypted_zip
   if ! [[ $? -eq 0 ]];then err_echo "Unknown unzip error during --list!";fi
+  ! [ $skiplog ] && list_log "The contents of $unencrypted_zip were displayed via --list"
 }
 
 edit_file_from_archive() {
+  local file=$1
   local unencrypted_zip=$2
-  if ! [[ $(check_file_existence $FILE $unencrypted_zip) ]];then
-    err_echo "Operation --edit failed, $FILE not found in the archive!"
+  if ! [[ $(check_file_existence $file $unencrypted_zip) ]];then
+    err_echo "Operation --edit failed, $file not found in the archive!"
     exit 1
   fi
-  extract_file_from_archive $FILE $unencrypted_zip
-  filehash_orig=$(checksum $FILE)
-  if command -v $EDITOR >/dev/null;then
-    [ $verbose ] && edit_echo "Attempting to launch editor: $EDITOR"
-    $EDITOR $FILE
+  extract_file_from_archive $file $unencrypted_zip
+  filehash_orig=$(checksum $file)
+  if [ $test ];then # skip the whole interactive bit, just modify the file
+    echo "Ch-ch-ch-ch-changes" >> $file
   else
-    edit_echo "Couldn't find editor \"$EDITOR\", launching with nano"
-    EDITOR=nano
-    $EDITOR $FILE
+    if command -v $EDITOR >/dev/null;then
+      [ $verbose ] && edit_echo "Attempting to launch editor: $EDITOR"
+      $EDITOR $file
+    else
+      edit_echo "Couldn't find editor \"$EDITOR\", launching with nano"
+      EDITOR=nano
+      $EDITOR $file
+    fi
   fi
   if [[ $? -eq 0 ]];then
-    filehash_new=$(checksum $FILE)
+    filehash_new=$(checksum $file)
     if [[ filehash_orig == filehash_new ]];then
-      ! [ $skiplog ] && edit_log "$FILE was opened in an editor but no changes were made"
-      edit_echo "$FILE was left unchanged, archive will remain unchanged, cleaning up"
+      ! [ $skiplog ] && edit_log "$file was opened in an editor but no changes were made"
+      edit_echo "$file was left unchanged, archive will remain unchanged, cleaning up"
     else
-      ! [ $skiplog ] && edit_log "$FILE was opened in an editor and successfully modified"
-      create_or_update_archive $FILE $unencrypted_zip
+      ! [ $skiplog ] && edit_log "$file was opened in an editor and successfully modified"
+      create_or_update_archive $file $unencrypted_zip
     fi
   else
     err_echo "Editor \"$EDITOR\" exited with a non-zero status! ($?) Cleaning up exposed files."
     if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    if [ -f $FILE ];then secure_remove_file $FILE;fi
+    if [ -f $file ];then secure_remove_file $file;fi
     exit 1
   fi
-  if [ -f $FILE ];then secure_remove_file $FILE;fi
+  if [ -f $file ];then secure_remove_file $file;fi
 }
 
 decrypt_zip() {
@@ -378,6 +388,7 @@ encrypt_zip() {
   if ! [ $skiplog ];then
     encrypt_log "Encrypting $unencrypted_zip"
     local msg=$(zip -urj $BACKUP $LOG)
+    sleep 0.1
     if [[ $? -eq 0 ]];then
       log_echo "Archive log successfully updated"
     else
@@ -459,14 +470,15 @@ append_to_activity_log() {
   fi
 }
 
-add_update_log()  { append_to_activity_log "ADD/UPDATE: $*"; }
-remove_log()      { append_to_activity_log "REMOVE: $*";     }
-edit_log()        { append_to_activity_log "EDIT: $*";       }
-extract_log()     { append_to_activity_log "EXTRACT: $*";    }
-print_log()       { append_to_activity_log "PRINT: $*";      }
-encrypt_log()     { append_to_activity_log "ENCRYPT: $*";    }
-decrypt_log()     { append_to_activity_log "DECRYPT: $*";    }
-cleanup_log()     { append_to_activity_log "CLEANUP: $*";    }
+add_update_log()  { append_to_activity_log "ADD/UPDATE   $*"; }
+remove_log()      { append_to_activity_log "REMOVE       $*"; }
+edit_log()        { append_to_activity_log "EDIT         $*"; }
+extract_log()     { append_to_activity_log "EXTRACT      $*"; }
+print_log()       { append_to_activity_log "PRINT        $*"; }
+list_log()        { append_to_activity_log "LIST         $*"; }
+encrypt_log()     { append_to_activity_log "ENCRYPT      $*"; }
+decrypt_log()     { append_to_activity_log "DECRYPT      $*"; }
+cleanup_log()     { append_to_activity_log "CLEANUP      $*"; }
 
 add_update_echo() { echo "[${GN}${BD}!${RS}] ${GN}${BD}ADD${RS}${BD}/${GN}UPDATE${RS}: $*"; }
 remove_echo()     { echo "[${RD}${BD}!${RS}] ${RD}REMOVE${RS}: $*"; }
