@@ -20,23 +20,23 @@ Usage: $(basename $0) [OPTION] [FILE] ( -o [NEW BACKUP] || -b [EXISTING BACKUP] 
 
 OPTIONS:
 
-  -h, --help                    This screen
-  -ex, --examples               Print examples of usage
-  -v, --verbose                 Increase output to assist in debugging
-  -s, --skip-logging            Disable updating of the archive log file
+  -h,  --help                    This screen
+  -ex, --examples                Print examples of usage
+  -v,  --verbose                 Increase output to assist in debugging
+  -s,  --skip-logging            Disable updating of the archive log file
+  -n,  --new                     Treat --backup as new archive creation
 
-  -n, --new                     Treat --backup as new archive creation
-  -b FILE, --backup FILE        Specify existing encrypted archive to use
+  -b FILE, --backup FILE         Specify existing encrypted archive to use
 
-  -l, --list                    List contents of existing backup archive, repack
-  -d, --decrypt                 Decrypt existing backup archive
+  -l, --list                     List contents of existing backup archive, repack
+  -d, --decrypt                  Decrypt existing backup archive
 
-  -a FILE, --add FILE           Add FILE to archive (or create a new one)
-  -p FILE, --print FILE         Print contents of FILE to STDOUT, repack
-  -e FILE, --edit FILE          Open FILE in $EDITOR for modification, repack
-  -x FILE, --extract FILE       Extract a specific FILE from existing archive
-  -r FILE, --remove FILE        Remove a file from an existing archive
-  -u FILE, --update FILE        Update a specific FILE within existing archive
+  -a FILE, --add FILE            Add FILE to archive (or create a new one)
+  -p FILE, --print FILE          Print contents of FILE to STDOUT, repack
+  -e FILE, --edit FILE           Open FILE in $EDITOR for modification, repack
+  -x FILE, --extract FILE        Extract a specific FILE from existing archive
+  -r FILE, --remove FILE         Remove a file from an existing archive
+  -u FILE, --update FILE         Update a specific FILE within existing archive
                                   (ie, overwrite keys.txt with a new version)
 "
 }
@@ -77,10 +77,10 @@ EXAMPLES:
 }
 
 main() {
-  if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup && ! $create ]];then
+  if [[ $list||$prnt||$extract||$update||$edit||$remove ]]||[[ $add && $backup && ! $create ]];then
     decrypt_zip $BACKUP
-    if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
   fi
+  if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
   if [[ $create && $add ]] || [[ $add && ! $backup ]];then create_new_archive $FILE $BACKUP
   elif [[ $add && $backup ]];then # add file to existing archive
     if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
@@ -124,6 +124,7 @@ main() {
   fi
   if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
   if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  gpg_clear_cache
 }
 
 parse_and_setup(){
@@ -193,6 +194,7 @@ sanity_check_args() {
       create_echo "--backup was blank or resolves to a directory, defaulting to datestamp" \
         "for filename: $BACKUP"
     fi
+
   fi
   if [ $backup ];then
     if ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
@@ -281,7 +283,6 @@ create_new_archive() {
       "archive, don't use --new/-n. Select a different file name and try again."
     err_exit
   fi
-  echo "in here"
   zip -rj $unencrypted_zip $file # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
     if ! [ $skiplog ];then create_log "File $file was added or updated within $unencrypted_zip";fi
@@ -381,7 +382,7 @@ decrypt_zip() {
   if [[ $test ]];then
     exit_msg="$(gpg -q --batch --yes --passphrase $testpass -o $unencrypted_zip --decrypt $1 2>&1)"
   else
-    exit_msg="$(gpg -q --no-symkey-cache -o $unencrypted_zip --decrypt $1 2>&1)"
+    exit_msg="$(gpg -q -o $unencrypted_zip --decrypt $1 2>&1)"
   fi
   if [[ $? -eq 0 ]]; then
     decrypt_echo "Success, $unencrypted_zip has been restored"
@@ -422,11 +423,11 @@ encrypt_zip() {
   fi
   if [[ $test ]];then
     gpg -q --batch --yes --passphrase $testpass --cipher-algo $ALGO --symmetric $unencrypted_zip
-  elif [[ $add || $update || $remove || $edit ]];then
-    # --yes during add/update, user is explicitly running a write command already
-    gpg -q --yes --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
+  elif [[ $add || $update || $remove || $edit || $list || $prnt ]];then
+    # --yes during read-only (activity.log updates) and during user explicit writes
+    gpg -q --yes --cipher-algo $ALGO --symmetric $unencrypted_zip
   else # in other situations we may want to confirm over-writing if it crops up
-    gpg -q --no-symkey-cache --cipher-algo $ALGO --symmetric $unencrypted_zip
+    gpg -q --cipher-algo $ALGO --symmetric $unencrypted_zip
   fi
   if [[ $? -eq 0 ]];then
     encrypt_echo "Success, $unencrypted_zip.gpg protected by $ALGO"
@@ -474,28 +475,37 @@ unsecure_remove_file() {
   fi
 }
 
+gpg_clear_cache() {
+  gpg-connect-agent reloadagent /bye >/dev/null
+  if [[ $? -eq 0 ]];then
+    [ $verbose ] && cleanup_echo "GPG agent reloaded to flush cached symkey"
+  else
+    warn_echo "GPG agent reload has failed! Cached symkeys may still be present. You can try to" \
+      "run 'gpg-connectagent reloadagent /bye' to try again, or kill the agent process manually. "
+  fi
+}
+
+append_to_activity_log() {
+  datestamp=$(date "+%Y-%m-%d %H:%M:%S")
+  if ! [ $skiplog ];then echo "$datestamp $1" >> activity.log;fi
+}
+
 checksum() {
   echo $(sha256sum $1 | cut -f1 -d ' ')
 }
 
 trap_cleanup() {
-  if [[ $backup && -f ${BACKUP%????} && ! $decrypt ]];then secure_remove_file ${BACKUP%????};fi
+  if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
+  if [[ $BACKUP && $BACKUP == *.zip && -f $BACKUP ]];then secure_remove_file $BACKUP;fi
   if [[ $prnt || $edit ]] && [[ -f $FILE ]];then secure_remove_file $FILE;fi
+  gpg_clear_cache
   exit 1
-}
-
-append_to_activity_log() {
-  datestamp=$(date "+%Y-%m-%d %H:%M:%S")
-  if ! [[ $skiplog ]];then
-    echo "$datestamp $1" >> activity.log
-  else
-    [ $verbose ] && log_echo "Skipping log update due to --skip-logging"
-  fi
 }
 
 err_exit() {
   if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
   if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  gpg_clear_cache
   exit 1
 }
 
