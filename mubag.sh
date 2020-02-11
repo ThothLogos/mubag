@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # TODO: Add --algo to forward options to gpg's --cipher-algo, use ALGO config for default
-# TODO: What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
-# TODO: Should log be nested so we can track failures? ie, a wrapper zip containing unencrypted log?
 # TODO: Add user to activity log
+# TODO: (?) Should log be nested so we can track failures? ie, a wrapper zip containing unencrypted log?
+# TODO: (?) What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
 
 trap trap_cleanup SIGINT SIGTERM
 source config.sh
@@ -25,8 +25,8 @@ OPTIONS:
   -v, --verbose                 Increase output to assist in debugging
   -s, --skip-logging            Disable updating of the archive log file
 
+  -n, --new                     Treat --backup as new archive creation
   -b FILE, --backup FILE        Specify existing encrypted archive to use
-  -o FILE, --out FILE           Specify dir/name of output file for new archive
 
   -l, --list                    List contents of existing backup archive, repack
   -d, --decrypt                 Decrypt existing backup archive
@@ -78,25 +78,18 @@ EXAMPLES:
 }
 
 main() {
-  if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup ]];then
+  if [[ $list||$prnt||$extract||$update||$edit||$remove ]] || [[ $add && $backup && ! $create ]];then
     decrypt_zip $BACKUP
-    BACKUP=${BACKUP%????} # chop off .gpg
+    if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
   fi
-  if [ $add ] && ! [ $backup ]; then # create new archive
-    if ! [ $out ];then
-      err_echo "The --add option requires --backup FILE or --out FILE to be paired with it. If" \
-        "you're trying to update an existing backup use -b/--backup. If you're trying to start" \
-        "a new backup, use -o/--out.";exit 1
-    else
-      create_or_update_archive $FILE $OUTFILE
-    fi
-  elif [ $add ] && [ $backup ];then # update existing archive
+  if [[ $create && $add ]] || [[ $add && ! $backup ]];then create_new_archive $FILE $BACKUP
+  elif [[ $add && $backup ]];then # add file to existing archive
     if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
-      secure_remove_file $BACKUP
       err_echo "File $FILE already exists inside $BACKUP.gpg, if you want to update the existing" \
-        "copy inside the archive, use --update.";exit 1
+        "copy inside the archive, use --update."
+      err_exit
     fi
-    create_or_update_archive $FILE $BACKUP
+    update_archive $FILE $BACKUP
   elif [ $decrypt ];then
     decrypt_zip $BACKUP
     if [[ $? -eq 0 ]];then
@@ -121,7 +114,7 @@ main() {
       else
         secure_remove_file $FILE
         mv $FILE.temp $FILE
-        create_or_update_archive $FILE $BACKUP
+        update_archive $FILE $BACKUP
       fi
     fi
   elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
@@ -130,13 +123,12 @@ main() {
   elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
   elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
   fi
-  if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
   if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
-  if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
 }
 
 parse_and_setup(){
-  if [ "$#" -lt 1 ] || [ "$#" -gt 9 ]; then
+  if [ "$#" -lt 1 ] || [ "$#" -gt 10 ]; then
     err_echo "Incorrect number of args, see --help:"
     display_usage
     exit 1
@@ -150,6 +142,7 @@ parse_and_setup(){
       -l|--list) list=true; shift 1;;
       -d|--decrypt) decrypt=true; shift 1;;
       -ne|--no-encrypt) preventencrypt=true; shift 1;;
+      -n|--new) create=true; shift 1;;
 
       -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
                 else err_echo "--backup missing FILE!";exit 1;fi;;
@@ -184,26 +177,40 @@ parse_and_setup(){
       *) handle_argument "$1"; shift 1;;
     esac
   done
+
   LOG_DISABLED=false
 }
 
-sanity_checks() {
+sanity_check_args() {
+  if [[ $create && ! $add ]];then
+    err_echo "If you're using --new you must specify a file to --add/-a, too!"
+    display_usage
+    exit 1
+  elif [[ $create && $add ]] || [[ $add && ! $backup ]] || [[ $add && ! $BACKUP ]];then
+    if [[ $BACKUP = "" || -d $BACKUP ]];then
+      if [ -d $BACKUP ] && ! [[ $BACKUP == */ ]];then BACKUP="$BACKUP/";fi
+      BACKUP="${BACKUP}${DATE}.zip"
+      backup=true
+      create_echo "--backup was blank or resolves to a directory, defaulting to datestamp" \
+        "for filename: $BACKUP"
+    fi
+  fi
   if [ $backup ];then
-    if ! [ -f $BACKUP ];then
+    if ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
+      err_echo "Do what with --backup $BACKUP? You must select an operation to perform."
+      display_usage
+      exit 1
+    elif ! [ -f $BACKUP ] && ! [ $create ];then
       err_echo "The --backup FILE you specified cannot be found"
       exit 1
-    elif ! [[ $BACKUP == *.gpg ]];then
+    elif [[ -f $BACKUP && ! $BACKUP == *.gpg ]];then
       err_echo "Please specify a --backup FILE that ends in .gpg"
-      exit 1
-    elif ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
-      err_echo "Do what with --backup $BACKUP? You must select an operation to perform, see --help."
       exit 1
     fi
   elif ! [ $backup ] && [[ $decrypt||$list||$prnt||$extract||$update||$edit||$remove ]];then
     err_echo "Cannot complete this operation without --backup specified!"
     exit 1
   fi
-
   if [[ $add || $update ]] && [[ ! $FILE || ! -f $FILE ]];then
     err_echo "The file targeted for add/update ($FILE) not found!"
     exit 1
@@ -262,28 +269,38 @@ extract_file_from_archive() {
   fi
 }
 
-create_or_update_archive() {
+create_new_archive() {
   local file=$1
   local unencrypted_zip=$2
-  if [ $out ] && [[ $OUTFILE == "" || -d $OUTFILE ]];then
-    if [ -d $OUTFILE ] && ! [ $OUTFILE == */ ];then OUTFILE="$OUTFILE/";fi
-    unencrypted_zip="${OUTFILE}${DATE}.zip"
-    OUTFILE="${OUTFILE}${DATE}.zip"
-    add_update_echo "--out was blank or resolves to a directory, defaulting to datestamp" \
-      "for filename: $OUTFILE"
+  if [ $BACKUP ] && [ -f $BACKUP ];then
+    err_echo "--backup $BACKUP would over-write an existing file! If you are trying to modify that" \
+      "archive, don't use --new/-n. Select a different file name and try again."
+    err_exit
   fi
-  if [ $OUTFILE ] && [ -f $OUTFILE ];then
-    err_echo "Doing --out $OUTFILE would over-write an existing file! If you want to" \
-      "update an existing backup, use --backup instead of --out. Otherwise, pick a different file" \
-      "location/name or remove the blocking file manually and re-run. Oopsie prevention."
-    exit 1
+  echo "in here"
+  zip -rj $unencrypted_zip $file # -rj abandon directory structure of files added
+  if [[ $? -eq 0 ]];then
+    if ! [ $skiplog ];then create_log "File $file was added or updated within $unencrypted_zip";fi
+    create_echo "Success, archive creation complete $unencrypted_zip"
+    ! [ $skiplog ] && create_log "New archive $unencrypted_zip created"
+  elif [[ $? -eq 12 ]];then
+    create_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
+    err_exit
+  else
+    err_echo "Unknown zip creation or update error!"
+    err_exit
   fi
+}
+
+update_archive() {
+  local file=$1
+  local unencrypted_zip=$2
   zip -urj $unencrypted_zip $file # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
     if ! [ $skiplog ];then # && ! [[ "$file" == "$LOG" ]];then 
-      add_update_log "File $file was added or updated within $unencrypted_zip"
+      add_update_log "File $file was updated within $unencrypted_zip"
     fi
-    add_update_echo "Success, archive creation/update complete"
+    add_update_echo "Success, archive update complete $unencrypted_zip"
   elif [[ $? -eq 12 ]];then
     add_update_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
     err_exit
@@ -342,7 +359,7 @@ edit_file_from_archive() {
       edit_echo "$file was left unchanged, archive will remain unchanged, cleaning up"
     else
       ! [ $skiplog ] && edit_log "$file was opened in an editor and successfully modified"
-      create_or_update_archive $file $unencrypted_zip
+      update_archive $file $unencrypted_zip
     fi
   else
     err_echo "Editor \"$EDITOR\" exited with a non-zero status! ($?) Cleaning up exposed files."
@@ -390,7 +407,6 @@ encrypt_zip() {
     encrypt_log "Encrypting $unencrypted_zip"
     local msg=$(zip -urj $unencrypted_zip $LOG)
     if [[ $? -eq 0 ]];then
-      sleep 0.1
       log_echo "Archive log successfully updated within $unencrypted_zip"
       if [ -f $LOG ];then secure_remove_file $LOG;fi
     else
@@ -474,12 +490,12 @@ append_to_activity_log() {
 }
 
 err_exit() {
-  if [ $OUTFILE ];then BACKUP=$OUTFILE;fi
   if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
-  if [[ $backup || $out ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
   exit 1
 }
 
+create_log()      { append_to_activity_log "CREATE       $*"; }
 add_update_log()  { append_to_activity_log "ADD/UPDATE   $*"; }
 remove_log()      { append_to_activity_log "REMOVE       $*"; }
 edit_log()        { append_to_activity_log "EDIT         $*"; }
@@ -490,6 +506,7 @@ encrypt_log()     { append_to_activity_log "ENCRYPT      $*"; }
 decrypt_log()     { append_to_activity_log "DECRYPT      $*"; }
 cleanup_log()     { append_to_activity_log "CLEANUP      $*"; }
 
+create_echo()     { echo "[${GN}${BD}!${RS}] ${GN}${BD}CREATE${RS}: $*"; }
 add_update_echo() { echo "[${GN}${BD}!${RS}] ${GN}${BD}ADD${RS}${BD}/${GN}UPDATE${RS}: $*"; }
 remove_echo()     { echo "[${RD}${BD}!${RS}] ${RD}REMOVE${RS}: $*"; }
 edit_echo()       { echo "    ${MG}EDIT${RS}: $*";       }
@@ -503,6 +520,6 @@ err_echo()        { echo "[${RD}${BD}!!!${RS}] ${RD}${BD}ERROR${RS} [${RD}${BD}!
 log_echo()        { echo "${BD}LOGGING${RS}: $*"; }
 
 parse_and_setup $*
-sanity_checks
+sanity_check_args
 main
 exit 0
