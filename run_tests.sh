@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# TODO: Test every exit route in existing functionality, many failures missing
+
 TESTDIR="test_temp"
 TESTPASS="gogo"
 source config.sh
@@ -7,6 +9,8 @@ source config.sh
 main() {
   setup
   do_test "test_create_new_archive"
+  do_test "test_create_new_archive_default_name_when_backup_missing"
+  do_test "test_create_new_archive_default_when_backup_is_a_directory"
   do_test "test_add_files_to_archive"
   do_test "test_list_files_in_archive"
   do_test "test_print_file_from_archive"
@@ -51,24 +55,43 @@ do_test() {
   if [[ $ret == "0" ]];then
     ok_echo
   else
+    echo "$ret"
     fail_echo
   fi
-  sleep 0.1
+  sleep 0.02
 }
 
 test_create_new_archive() {
-  local match="archive creation/update complete"
-  local out=$(./mubag.sh -v --test $TESTPASS -o $TESTDIR/test.zip -a $TESTDIR/A.txt)
+  local match="Success, archive creation complete"
+  local out=$(./mubag.sh -v --test $TESTPASS --new -b $TESTDIR/test.zip -a $TESTDIR/A.txt)
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+}
+
+test_create_new_archive_default_name_when_backup_missing() {
+  local match="defaulting to datestamp"
+  local matchtwo="Success, archive creation complete"
+  local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt)
+  local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
+  [ -f $archive.gpg ] && rm $archive.gpg
+  if [[ $out =~ $match ]] && [[ $out =~ $matchtwo ]];then echo "0";else echo "1";fi
+}
+
+test_create_new_archive_default_when_backup_is_a_directory() {
+  local match="defaulting to datestamp"
+  local matchtwo="Success, archive creation complete $TESTDIR"
+  local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt -b $TESTDIR)
+  local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
+  [ -f $archive.gpg ] && rm $archive.gpg
+  if [[ $out =~ $match ]] && [[ $out =~ $matchtwo ]];then echo "0";else echo "1";fi
 }
 
 test_add_files_to_archive() {
   local passing=false
-  local match="archive creation/update complete"
+  local match="archive update complete"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -a $TESTDIR/B.txt)
   if [[ $out =~ $match ]];then passing=true;else echo "1";fi
   local out=$(./mubag.sh -v --test $TESTPASS --backup=$TESTDIR/test.zip.gpg --add=$TESTDIR/C.txt)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [ $passing ] && [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_list_files_in_archive() {
@@ -91,7 +114,7 @@ test_extract_file_from_archive() {
 }
 
 test_edit_file_within_archive() {
-  local match="archive creation/update complete"
+  local match="archive update complete"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -e C.txt)
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
@@ -107,7 +130,7 @@ test_failure_updating_unchanged_file() {
 test_update_file_within_archive() {
   ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x A.txt >/dev/null
   echo "Ch-ch-ch-ch-changes" >> A.txt
-  local match="archive creation/update complete"
+  local match="archive update complete"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt 2>&1)
   if [ -f A.txt ];then rm A.txt;fi
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
