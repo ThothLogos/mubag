@@ -35,10 +35,9 @@ OPTIONS:
   -p FILE, --print FILE         Print contents of FILE to STDOUT, repack
   -e FILE, --edit FILE          Open FILE in $EDITOR for modification, repack
   -x FILE, --extract FILE       Extract a specific FILE from existing archive
+  -r FILE, --remove FILE        Remove a file from an existing archive
   -u FILE, --update FILE        Update a specific FILE within existing archive
                                   (ie, overwrite keys.txt with a new version)
-  -r FILE, --remove FILE        Remove a file from an existing archive
-
 "
 }
 
@@ -48,8 +47,8 @@ EXAMPLES:
 
   Create a new encrypted archive, use any file:
 
-    $(basename $0) --add=secret.txt --out=backup.zip
-    $(basename $0) -o backup.zip -a dirtypic.png
+    $(basename $0) --new --add=secret.txt --backup=newbackup.zip
+    $(basename $0) --new -a dirtypic.png
 
   List contents or print specific files from encrypted archive:
 
@@ -98,9 +97,9 @@ main() {
     fi
   elif [ $update ];then
     if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
-      secure_remove_file $BACKUP
       err_echo "$FILE not found in $BACKUP.gpg, can't --update. If you want to add that" \
-        "file instead try: $(basename $0) --add $FILE --backup $BACKUP";exit 1
+        "file instead try: $(basename $0) --add $FILE --backup $BACKUP"
+      err_exit
     else
       ! [ $skiplog ] && add_update_log "Attempting to update $FILE within $BACKUP"
       mv $FILE $FILE.temp
@@ -258,14 +257,19 @@ extract_file_from_archive() {
   local file=$1
   local unencrypted_zip=$2
   [ $verbose ] && extract_echo "Attempting to extract $file from $unencrypted_zip"
-  unzip -j $unencrypted_zip $file
-  if ! [[ $? -eq 0 ]];then
+  if [[ $(check_file_existence $file $unencrypted_zip ) -eq 0 ]];then
+    unzip -j $unencrypted_zip $file
+    if [[ $? -eq 0 ]];then
+      extract_echo "Success, $file recovered from archive $unencrypted_zip"
+      ! [ $skiplog ] && extract_log "Extraction of $file from $unencrypted_zip was successful"
+    else
+      err_echo "Unzip failed during extraction with code $?"
+      err_exit
+    fi
+  else
     ! [ $skiplog ] && extract_log "Extraction of $file failed, does not exist in $unencrypted_zip"
     err_echo "File $file not found within $unencrypted_zip, aborting"
     err_exit
-  else
-    ! [ $skiplog ] && extract_log "Extraction of $file from $unencrypted_zip was successful"
-    extract_echo "Success, $file recovered from archive $unencrypted_zip"
   fi
 }
 
@@ -287,7 +291,7 @@ create_new_archive() {
     create_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
     err_exit
   else
-    err_echo "Unknown zip creation or update error!"
+    err_echo "Zip failed during archive creation with code $?"
     err_exit
   fi
 }
@@ -305,7 +309,7 @@ update_archive() {
     add_update_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
     err_exit
   else
-    err_echo "Unknown zip creation or update error!"
+    err_echo "Zip failed during archive update with code $?"
     err_exit
   fi
 }
@@ -335,8 +339,8 @@ edit_file_from_archive() {
   local file=$1
   local unencrypted_zip=$2
   if ! [[ $(check_file_existence $file $unencrypted_zip) ]];then
-    err_echo "Operation --edit failed, $file not found in the archive!"
-    exit 1
+    err_echo "Edit failed - $file not found in the archive!"
+    err_exit
   fi
   extract_file_from_archive $file $unencrypted_zip
   filehash_orig=$(checksum $file)

@@ -8,18 +8,22 @@ source config.sh
 
 main() {
   setup
-  do_test "test_create_new_archive"
   do_test "test_create_new_archive_default_name_when_backup_missing"
   do_test "test_create_new_archive_default_when_backup_is_a_directory"
+  do_test "test_create_new_archive"
+  do_test "fail_add_existing_file_in_archive"
   do_test "test_add_files_to_archive"
   do_test "test_list_files_in_archive"
   do_test "test_print_file_from_archive"
+  do_test "fail_extract_file_not_found_in_archive"
   do_test "test_extract_file_from_archive"
+  do_test "fail_edit_file_not_found_in_archive"
   do_test "test_edit_file_within_archive"
-  do_test "test_failure_updating_unchanged_file"
+  do_test "fail_update_unchanged_file"
+  do_test "fail_update_file_not_found_in_archive"
   do_test "test_update_file_within_archive"
   do_test "test_remove_file_from_archive"
-  do_test "test_failure_to_find_file_in_archive"
+  do_test "fail_to_find_file_in_archive"
   shutdown
 }
 
@@ -58,13 +62,6 @@ do_test() {
     echo "$ret"
     fail_echo
   fi
-  sleep 0.02
-}
-
-test_create_new_archive() {
-  local match="Success, archive creation complete"
-  local out=$(./mubag.sh -v --test $TESTPASS --new -b $TESTDIR/test.zip -a $TESTDIR/A.txt)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_create_new_archive_default_name_when_backup_missing() {
@@ -83,6 +80,19 @@ test_create_new_archive_default_when_backup_is_a_directory() {
   local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
   [ -f $archive.gpg ] && rm $archive.gpg
   if [[ $out =~ $match ]] && [[ $out =~ $matchtwo ]];then echo "0";else echo "1";fi
+}
+
+test_create_new_archive() {
+  local match="Success, archive creation complete"
+  local out=$(./mubag.sh -v --test $TESTPASS --new -b $TESTDIR/test.zip -a $TESTDIR/A.txt)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+}
+
+fail_add_existing_file_in_archive() {
+  local match="already exists inside"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -a $TESTDIR/A.txt)
+  [ -f A.txt ] && rm A.txt
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
 test_add_files_to_archive() {
@@ -106,10 +116,22 @@ test_print_file_from_archive() {
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
+fail_extract_file_not_found_in_archive() {
+  local match="DNE.void not found within"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x DNE.void 2>&1)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+}
+
 test_extract_file_from_archive() {
   local match="recovered from archive"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x B.txt 2>&1)
   if [ -f B.txt ];then rm B.txt;fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+}
+
+fail_edit_file_not_found_in_archive() {
+  local match="DNE.void not found"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -e DNE.void)
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
@@ -119,11 +141,19 @@ test_edit_file_within_archive() {
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
-test_failure_updating_unchanged_file() {
+fail_update_unchanged_file() {
   ./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x A.txt >/dev/null
   local match="The file A.txt in the archive is identical"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt 2>&1)
   if [ -f A.txt ];then rm A.txt;fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+}
+
+fail_update_file_not_found_in_archive() {
+  local match="DNE.void not found in"
+  touch DNE.void
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u DNE.void 2>&1)
+  [ -f DNE.void ] && rm DNE.void
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
@@ -142,7 +172,7 @@ test_remove_file_from_archive() {
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
 }
 
-test_failure_to_find_file_in_archive() {
+fail_to_find_file_in_archive() {
   local match="DNE.void not found in"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p DNE.void 2>&1)
   if [[ $out =~ $match ]];then echo "0";else echo "1";fi
