@@ -229,17 +229,18 @@ main() {
 }
 
 remove_file_from_archive() {
+  local file=$1
   local unenc_zip=$2
-  [ $verbose ] && remove_echo "Attempting to remove $FILE from $unenc_zip"
-  zip --delete $unenc_zip $FILE
+  [ $verbose ] && remove_echo "Attempting to remove $file from $unenc_zip"
+  zip --delete $unenc_zip $file
   if ! [[ $? -eq 0 ]];then
     if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
-    ! [ $skiplog ] && remove_log "Removal of $FILE failed, does not exist in $unenc_zip"
-    err_echo "File $FILE not found within $unenc_zip, aborting"
+    ! [ $skiplog ] && remove_log "Removal of $file failed, does not exist in $unenc_zip"
+    err_echo "File $file not found within $unenc_zip, aborting"
     err_exit
   else
-    ! [ $skiplog ] && remove_log "Removal of $FILE from $unenc_zip was successful"
-    remove_echo "Success, $FILE removed from archive"
+    ! [ $skiplog ] && remove_log "Removal of $file from $unenc_zip was successful"
+    remove_echo "Success, $file removed from archive"
   fi
 }
 
@@ -255,12 +256,13 @@ check_file_existence() {
 }
 
 extract_logfile() {
+  local log=$1
   local unenc_zip=$2
-  [ $verbose ] && log_echo "Attempting to extract activity.log from $unenc_zip"
-  if [[ $(check_file_existence $LOG $unenc_zip) -eq 0 ]];then
-    unzip -j $unenc_zip $LOG
+  [ $verbose ] && log_echo "Attempting to extract $log from $unenc_zip"
+  if [[ $(check_file_existence $log $unenc_zip) -eq 0 ]];then
+    unzip -j $unenc_zip $log
   else
-    [ $verbose ] && log_echo "No activity.log present in this archive, one will be created"
+    [ $verbose ] && log_echo "No $log present in this archive, one will be created"
   fi
   
 }
@@ -386,13 +388,13 @@ edit_file_from_archive() {
 }
 
 decrypt_zip() {
-  [ $verbose ] && decrypt_echo "Attempting gpg decrypt"
   local unenc_zip=$1
-  local exit_msg
+  local exit_msg=""
+  [ $verbose ] && decrypt_echo "Attempting gpg decrypt"
   if [[ $test ]];then
-    gpg -q --batch --yes --passphrase $testpass -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1
+    exit_msg=$(gpg -q --batch --yes --passphrase $testpass -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1)
   else
-    gpg -q -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1
+    exit_msg=$(gpg -q -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1)
   fi
   if [[ $? -eq 0 ]]; then
     decrypt_echo "Success, $unenc_zip has been restored"
@@ -416,8 +418,8 @@ decrypt_zip() {
 }
 
 encrypt_zip() {
-  [ $verbose ] && encrypt_echo "Attempting gpg encrypt"
   local unenc_zip=$1
+  [ $verbose ] && encrypt_echo "Attempting gpg encrypt"
   if ! [ $skiplog ];then
     encrypt_log "Encrypting $unenc_zip"
     local msg=$(zip -urj $unenc_zip $LOG)
@@ -450,39 +452,35 @@ encrypt_zip() {
 }
 
 secure_remove_file() {
-  if [ $test ] && ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
-    unsecure_remove_file $1 # Avoid unnecessary SSD wear during tests
+  local file=$1
+  if [ $test ] && ! [ $skiplog ] && ! [[ $file == $LOG || $LOG_DISABLED ]];then
+    unsecure_remove_file $file # Avoid unnecessary SSD wear during tests
   else
-    local cmd=""
-    if command -v srm >/dev/null;then
-      cmd="srm -zv $1"
-    elif command -v shred >/dev/null;then
-      cmd="shred -uz $1"
-    fi
-    if ! [[ cmd == "" ]];then
-      $cmd # execute the removal
-      if [[ $? -eq 0 ]];then
-        if ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
-          cleanup_log "$1 securely erased with: $cmd"
-        fi
-        cleanup_echo "Success, $1 purged securely via: $cmd"
-      else
-        cleanup_echo "${RD}FALLBACK${RS}: Secure file removal failed! Resorting to using rm"
-        unsecure_remove_file $1
-      fi
+    if   command -v srm >/dev/null;  then srm -zv $file
+    elif command -v shred >/dev/null;then shred -uz $file
     else
       cleanup_echo "Secure file removal not found on system, resorting to using rm"
-      unsecure_remove_file $1
+      unsecure_remove_file $file
+    fi
+    if [[ $? -eq 0 ]];then
+      if ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
+        cleanup_log "$file securely erased with: $cmd"
+      fi
+      cleanup_echo "Success, $file purged securely via: $cmd"
+    else
+      cleanup_echo "${RD}FALLBACK${RS}: Secure file removal failed! Resorting to using rm"
+      unsecure_remove_file $file
     fi
   fi
 }
 
 unsecure_remove_file() {
-  rm -f $1
+  local file=$1
+  rm -f $file
   if [[ $? -eq 0 ]]; then
-    ! [ $skiplog ] && ! [[ $1 == $LOG ]] && cleanup_log "No secure removal found, $1" \
+    ! [ $skiplog ] && ! [[ $file == $LOG ]] && cleanup_log "No secure removal found, $file" \
       "removed via: $cmd"
-    cleanup_echo "Success, rm of $1 complete"
+    cleanup_echo "Success, rm of $file complete"
   else
     err_echo "File removal with rm failed! (Somehow?? You figure this one out.)"
     exit 1
@@ -506,12 +504,14 @@ gpg_get_available_ciphers() {
 }
 
 append_to_activity_log() {
+  local message=$1
   datestamp=$(date "+%Y-%m-%d %H:%M:%S")
-  if ! [ $skiplog ];then echo "$datestamp $1" >> activity.log;fi
+  if ! [ $skiplog ];then echo "$datestamp $message" >> activity.log;fi
 }
 
 checksum() {
-  echo $(sha256sum $1 | cut -f1 -d ' ')
+  local file=$1
+  echo $(sha256sum $file | cut -f1 -d ' ')
 }
 
 trap_cleanup() {
