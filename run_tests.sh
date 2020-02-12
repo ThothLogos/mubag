@@ -112,7 +112,7 @@ test_create_new_archive_default_name_when_backup_missing() {
   local ma="defaulting to datestamp"
   local mb="Success, archive creation complete"
   local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt)
-  local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
+  local archive=$(echo "$out" | grep "$mb" | awk -F '/' '{print $NF}')
   [[ -f $archive.gpg ]] && rm $archive.gpg
   if [[ $out =~ $ma ]] && [[ $out =~ $mb ]];then
     echo "0"
@@ -126,7 +126,7 @@ test_create_new_archive_default_when_backup_is_a_directory() {
   local ma="defaulting to datestamp"
   local mb="Success, archive creation complete $TESTDIR"
   local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt -b $TESTDIR)
-  local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
+  local archive=$(echo "$out" | grep "$mb" | awk '{print $NF}')
   [[ -f $archive.gpg ]] && rm $archive.gpg
   if [[ $out =~ $ma ]] && [[ $out =~ $mb ]];then
     echo "0"
