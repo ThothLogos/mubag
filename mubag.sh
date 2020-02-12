@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# TODO: Add user to activity log
-# TODO: (?) Should log be nested so we can track failures? ie, a wrapper zip containing unencrypted log?
-# TODO: (?) What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
-
 trap trap_cleanup SIGINT SIGTERM
 source config.sh
 
@@ -291,8 +287,8 @@ create_new_archive() {
   local file=$1
   local unenc_zip=$2
   if [ $BACKUP ] && [ -f $BACKUP ];then
-    err_echo "--backup $BACKUP would over-write an existing file! If you are trying to modify that" \
-      "archive, don't use --new/-n. Select a different file name and try again."
+    err_echo "--backup $BACKUP would over-write an existing file! If you are trying to modify" \
+      "that archive, don't use --new/-n. Select a different file name and try again."
     err_exit
   fi
   zip -rj $unenc_zip $file # -rj abandon directory structure of files added
@@ -392,7 +388,7 @@ decrypt_zip() {
   local exit_msg=""
   [ $verbose ] && decrypt_echo "Attempting gpg decrypt"
   if [[ $test ]];then
-    exit_msg=$(gpg -q --batch --yes --passphrase $testpass -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1)
+    exit_msg=$(gpg -q --batch --yes --passphrase $testpass -o $unenc_zip -d $unenc_zip.gpg 2>&1)
   else
     exit_msg=$(gpg -q -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1)
   fi
@@ -505,8 +501,9 @@ gpg_get_available_ciphers() {
 
 append_to_activity_log() {
   local message=$1
-  datestamp=$(date "+%Y-%m-%d %H:%M:%S")
-  if ! [ $skiplog ];then echo "$datestamp $message" >> activity.log;fi
+  local datestamp=$(date "+%Y-%m-%d %H:%M:%S")
+  local user="$(whoami)@$(hostname)"
+  if ! [ $skiplog ];then echo "$datestamp $user $message" >> activity.log;fi
 }
 
 checksum() {
