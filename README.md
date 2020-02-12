@@ -10,7 +10,7 @@ Traditionally avoiding developing in Bash when possible, this time it seemed mos
 
 ## Test Script
 
-This repo includes a partner script `run_tests.sh` which is primarily used as a development tool for the primary functionality, but can serve as a good confirmation that this script will run successfully on your system (success may vary based on older versions of Bash or GPG installs).
+This repo includes a partner script `run_tests.sh` which is primarily used as a development tool for `mubag.sh`'s functionality, but can serve as a good confirmation that this script will run successfully on your system (success may vary based on older versions of Bash or GPG installs).
 
 ## How to Use
 
