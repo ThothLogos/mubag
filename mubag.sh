@@ -143,13 +143,14 @@ sanity_check_args() {
     display_usage
     exit 1
   elif [[ $create && $add ]] || [[ $add && ! $backup ]] || [[ $add && ! $BACKUP ]];then
-    if [[ $BACKUP = "" || -d $BACKUP ]];then
-      if [ -d $BACKUP ] && ! [[ $BACKUP == */ ]];then BACKUP="$BACKUP/";fi
-      BACKUP="${BACKUP}${DATE}.zip"
-      backup=true
-      create_echo "--backup was blank or resolves to a directory, defaulting to datestamp" \
-        "for filename: $BACKUP"
+    if [[ -d $BACKUP && ! $BACKUP == */ && ! $BACKUP == "" ]];then
+      BACKUP="$BACKUP/${DATE}.zip"
+    elif [[ -d $BACKUP || $BACKUP = "" ]];then
+      BACKUP="$(pwd)/${DATE}.zip"
     fi
+    backup=true
+    create_echo "--backup was blank or resolves to a directory, defaulting to datestamp" \
+      "for filename: $BACKUP"
   fi
   if [ $backup ];then
     if ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
