@@ -450,26 +450,30 @@ encrypt_zip() {
 }
 
 secure_remove_file() {
-  local cmd=""
-  if command -v srm >/dev/null;then
-    cmd="srm -zv $1"
-  elif command -v shred >/dev/null;then
-    cmd="shred -uz $1"
-  fi
-  if ! [[ cmd == "" ]];then
-    $cmd # execute the removal
-    if [[ $? -eq 0 ]];then
-      if ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
-        cleanup_log "$1 securely erased with: $cmd"
+  if [ $test ] && ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
+    unsecure_remove_file $1 # Avoid unnecessary SSD wear during tests
+  else
+    local cmd=""
+    if command -v srm >/dev/null;then
+      cmd="srm -zv $1"
+    elif command -v shred >/dev/null;then
+      cmd="shred -uz $1"
+    fi
+    if ! [[ cmd == "" ]];then
+      $cmd # execute the removal
+      if [[ $? -eq 0 ]];then
+        if ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
+          cleanup_log "$1 securely erased with: $cmd"
+        fi
+        cleanup_echo "Success, $1 purged securely via: $cmd"
+      else
+        cleanup_echo "${RD}FALLBACK${RS}: Secure file removal failed! Resorting to using rm"
+        unsecure_remove_file $1
       fi
-      cleanup_echo "Success, $1 purged securely via: $cmd"
     else
-      cleanup_echo "${RD}FALLBACK${RS}: Secure file removal failed! Resorting to using rm"
+      cleanup_echo "Secure file removal not found on system, resorting to using rm"
       unsecure_remove_file $1
     fi
-  else
-    cleanup_echo "Secure file removal not found on system, resorting to using rm"
-    unsecure_remove_file $1
   fi
 }
 
