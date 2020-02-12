@@ -1,5 +1,6 @@
 EDITOR="nano"
 ALGO="TWOFISH"
+LOG="activity.log"
 
 DATE=`date "+%Y%m%d_%H_%M"`
 
