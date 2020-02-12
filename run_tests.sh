@@ -4,9 +4,22 @@ TESTDIR="test_temp"
 TESTPASS="gogo"
 source config.sh
 
+display_usage() {
+  echo -e "
+    Usage: run_tests.sh [OPTIONS]
+
+  -d, --debug                       Dump test failure output to STDOUT
+  -f, --fail-early                  Stop after the first failure
+
+  -h, --help                        This screen
+  "
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    -h|--help) display_usage; exit 0;;
     -d|--debug) debug=true; shift 1;;
+    -f|--fail-early) failearly=true; shift 1;;
     -*) err_echo "Unknown option $1" >&2; exit 1;;
     *) handle_argument "$1"; shift 1;;
   esac
@@ -18,6 +31,7 @@ main() {
   do_test "test_create_new_archive_default_name_when_backup_missing"
   do_test "test_create_new_archive_default_when_backup_is_a_directory"
   do_test "test_create_new_archive"
+  do_test "fail_decrypt_wrong_passphrase"
   do_test "test_decrypt_and_warn"
   do_test "fail_add_existing_file_in_archive"
   do_test "test_add_files_to_archive"
@@ -75,6 +89,7 @@ do_test() {
     fail_echo
     [ $debug ] && echo -e "\tTest return: $ret\n\n"
     fails=$((fails+1))
+    [ $failearly ] && report_results && exit 1
   fi
 }
 
@@ -124,6 +139,12 @@ test_create_new_archive_default_when_backup_is_a_directory() {
 test_create_new_archive() {
   local match="Success, archive creation complete"
   local out=$(./mubag.sh -v --test $TESTPASS --new -b $TESTDIR/test.zip -a $TESTDIR/A.txt)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
+}
+
+fail_decrypt_wrong_passphrase() {
+  local match="GPG decryption failed due to incorrect passphrase"
+  local out=$(./mubag.sh -v --test WRONGPASS -b $TESTDIR/test.zip.gpg --decrypt)
   if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
