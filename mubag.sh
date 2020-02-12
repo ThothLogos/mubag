@@ -19,24 +19,27 @@ Usage: $(basename $0) [OPTION] [FILE] ( -o [NEW BACKUP] || -b [EXISTING BACKUP] 
 
 OPTIONS:
 
-  -h,  --help                    This screen
-  -ex, --examples                Print examples of usage
-  -v,  --verbose                 Increase output to assist in debugging
-  -s,  --skip-logging            Disable updating of the archive log file
-  -n,  --new                     Treat --backup as new archive creation
+  -h,  --help                       This screen
+  -ex, --examples                   Print examples of usage
+  -v,  --verbose                    Increase output to assist in debugging
+  -s,  --skip-logging               Disable updating of the archive log file
+  -n,  --new                        Treat --backup as new archive creation
+  --ciphers, --show-ciphers         List the available gpg options for --algo
 
-  -b FILE, --backup FILE         Specify existing encrypted archive to use
+  -b FILE, --backup FILE            Specify existing encrypted archive to use
+  --algo ALGO, --cipher-algo ALGO   Set the encryption algorithm for gpg
+                                      (currently defaulting to: $ALGO)
 
-  -l, --list                     List contents of existing backup archive, repack
-  -d, --decrypt                  Decrypt existing backup archive
+  -l, --list                        List contents of existing backup archive
+  -d, --decrypt                     Decrypt existing backup archive
 
-  -a FILE, --add FILE            Add FILE to archive (or create a new one)
-  -p FILE, --print FILE          Print contents of FILE to STDOUT, repack
-  -e FILE, --edit FILE           Open FILE in $EDITOR for modification, repack
-  -x FILE, --extract FILE        Extract a specific FILE from existing archive
-  -r FILE, --remove FILE         Remove a file from an existing archive
-  -u FILE, --update FILE         Update a specific FILE within existing archive
-                                  (ie, overwrite keys.txt with a new version)
+  -a FILE, --add FILE               Add FILE to archive (or create a new one)
+  -p FILE, --print FILE             Print contents of FILE in archive to STDOUT
+  -e FILE, --edit FILE              Open FILE in $EDITOR for modification
+  -x FILE, --extract FILE           Extract FILE from existing archive
+  -r FILE, --remove FILE            Remove FILE from existing archive
+  -u FILE, --update FILE            Update/replace FILE within existing archive
+                                    (ie, overwrite keys.txt with a new version)
 "
 }
 
@@ -75,56 +78,6 @@ EXAMPLES:
 "
 }
 
-main() {
-  if [[ $list||$prnt||$extract||$update||$edit||$remove ]]||[[ $add && $backup && ! $create ]];then
-    decrypt_zip $BACKUP
-  fi
-  if [[ $create && $add ]] || [[ $add && ! $backup ]];then create_new_archive $FILE $BACKUP
-  elif [[ $add && $backup ]];then # add file to existing archive
-    if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
-      err_echo "File $FILE already exists inside $BACKUP.gpg, if you want to update the existing" \
-        "copy inside the archive, use --update."
-      err_exit
-    fi
-    update_archive $FILE $BACKUP
-  elif [ $decrypt ];then
-    decrypt_zip $BACKUP
-    if [[ $? -eq 0 ]];then
-      warn_echo "You have just decrypted the $BACKUP archive. It is exposed on the file system." \
-        "Please be aware of the risks and clean up sensitive files manually if necessary."
-    fi
-  elif [ $update ];then
-    if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
-      err_echo "$FILE not found in $BACKUP.gpg, can't --update. If you want to add that" \
-        "file instead try: $(basename $0) --add $FILE --backup $BACKUP"
-      err_exit
-    else
-      ! [ $skiplog ] && add_update_log "Attempting to update $FILE within $BACKUP"
-      mv $FILE $FILE.temp
-      unzip -j $BACKUP $FILE
-      if [[ $(checksum $FILE) == $(checksum $FILE.temp) ]];then
-        add_update_echo "The file $FILE in the archive is identical to the one you've targeted." \
-          "No changes were made, cleaning up."
-        ! [ $skiplog ] && add_update_log "[NO-OP] Update failed, no changes"
-        secure_remove_file $FILE
-        mv $FILE.temp $FILE
-      else
-        secure_remove_file $FILE
-        mv $FILE.temp $FILE
-        update_archive $FILE $BACKUP
-      fi
-    fi
-  elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
-  elif [ $list ];then list_archive_contents $BACKUP
-  elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
-  elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
-  elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
-  fi
-  if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
-  if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
-  gpg_clear_cache
-}
-
 parse_and_setup(){
   if [ "$#" -lt 1 ] || [ "$#" -gt 12 ]; then
     err_echo "Incorrect number of args, see --help:"
@@ -141,6 +94,7 @@ parse_and_setup(){
       -d|--decrypt) decrypt=true; shift 1;;
       -ne|--no-encrypt) preventencrypt=true; shift 1;;
       -n|--new) create=true; shift 1;;
+      --ciphers|--show-ciphers) gpg_get_available_ciphers; exit 0;;
 
       -al|--algo|--cipher-algo) algo=true; if [ $# -gt 1 ];then ALGO="$2"; shift 2
                 else err_echo "--algo missing ALGO option!";exit 1;fi;;
@@ -222,6 +176,56 @@ sanity_check_args() {
     exit 1
   fi
   if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
+}
+
+main() {
+  if [[ $list||$prnt||$extract||$update||$edit||$remove ]]||[[ $add && $backup && ! $create ]];then
+    decrypt_zip $BACKUP
+  fi
+  if [[ $create && $add ]] || [[ $add && ! $backup ]];then create_new_archive $FILE $BACKUP
+  elif [[ $add && $backup ]];then # add file to existing archive
+    if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
+      err_echo "File $FILE already exists inside $BACKUP.gpg, if you want to update the existing" \
+        "copy inside the archive, use --update."
+      err_exit
+    fi
+    update_archive $FILE $BACKUP
+  elif [ $decrypt ];then
+    decrypt_zip $BACKUP
+    if [[ $? -eq 0 ]];then
+      warn_echo "You have just decrypted the $BACKUP archive. It is exposed on the file system." \
+        "Please be aware of the risks and clean up sensitive files manually if necessary."
+    fi
+  elif [ $update ];then
+    if ! [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
+      err_echo "$FILE not found in $BACKUP.gpg, can't --update. If you want to add that" \
+        "file instead try: $(basename $0) --add $FILE --backup $BACKUP"
+      err_exit
+    else
+      ! [ $skiplog ] && add_update_log "Attempting to update $FILE within $BACKUP"
+      mv $FILE $FILE.temp
+      unzip -j $BACKUP $FILE
+      if [[ $(checksum $FILE) == $(checksum $FILE.temp) ]];then
+        add_update_echo "The file $FILE in the archive is identical to the one you've targeted." \
+          "No changes were made, cleaning up."
+        ! [ $skiplog ] && add_update_log "[NO-OP] Update failed, no changes"
+        secure_remove_file $FILE
+        mv $FILE.temp $FILE
+      else
+        secure_remove_file $FILE
+        mv $FILE.temp $FILE
+        update_archive $FILE $BACKUP
+      fi
+    fi
+  elif [ $prnt ];then print_file_from_archive $FILE $BACKUP
+  elif [ $list ];then list_archive_contents $BACKUP
+  elif [ $extract ];then extract_file_from_archive $FILE $BACKUP
+  elif [ $edit ];then edit_file_from_archive $FILE $BACKUP
+  elif [ $remove ];then remove_file_from_archive $FILE $BACKUP
+  fi
+  if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
+  if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  gpg_clear_cache
 }
 
 remove_file_from_archive() {
