@@ -6,6 +6,14 @@ TESTDIR="test_temp"
 TESTPASS="gogo"
 source config.sh
 
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d|--debug) debug=true; shift 1;;
+    -*) err_echo "Unknown option $1" >&2; exit 1;;
+    *) handle_argument "$1"; shift 1;;
+  esac
+done
+
 main() {
   setup
   do_test "test_create_new_archive_default_name_when_backup_missing"
@@ -24,11 +32,14 @@ main() {
   do_test "test_update_file_within_archive"
   do_test "test_remove_file_from_archive"
   do_test "fail_to_find_file_in_archive"
+  report_results
   shutdown
+  exit 0
 }
 
 setup() {
-  setup_echo "Setting up test environment... "
+  setup_echo "\nSetting up test environment... "
+  testcount=0; passes=0; fails=0;
   if ! [ -d $TESTDIR ];then mkdir $TESTDIR;fi
   pushd $TESTDIR > /dev/null
   for c in {A..C};do
@@ -38,7 +49,7 @@ setup() {
   done
   ok_echo
   popd > /dev/null
-  setup_echo "Running tests... \\n"
+  setup_echo "\n\tRunning tests...\n\n"
 }
 
 shutdown() {
@@ -56,89 +67,117 @@ do_test() {
   local testname=$1
   test_echo $testname
   local ret=$($testname)
+  testcount=$((testcount+1))
   if [[ $ret == "0" ]];then
     ok_echo
+    passes=$((passes+1))
   else
-    echo "$ret"
     fail_echo
+    [ $debug ] && echo -e "\tTest return: $ret\n\n"
+    fails=$((fails+1))
   fi
 }
 
+report_results() {
+  if [[ $passes == $testcount ]];then
+    echo -e "\n\t${GN}${BD}SUCCESS${RS} - All tests passed! $passes of $testcount"
+  else
+    echo -e "\n\t${RD}${BD}FAILURE${RS} - Some tests failed. $passes of $testcount pass," \
+      "$fails failed."
+  fi
+  echo
+}
+
 test_create_new_archive_default_name_when_backup_missing() {
-  local match="defaulting to datestamp"
-  local matchtwo="Success, archive creation complete"
+  local ma="defaulting to datestamp"
+  local mb="Success, archive creation complete"
   local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt)
   local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
-  [ -f $archive.gpg ] && rm $archive.gpg
-  if [[ $out =~ $match ]] && [[ $out =~ $matchtwo ]];then echo "0";else echo "1";fi
+  [[ -f $archive.gpg ]] && rm $archive.gpg
+  if [[ $out =~ $ma ]] && [[ $out =~ $mb ]];then
+    echo "0"
+  else
+    echo "1"
+    [ $debug ] && echo -e "$out"
+  fi
 }
 
 test_create_new_archive_default_when_backup_is_a_directory() {
-  local match="defaulting to datestamp"
-  local matchtwo="Success, archive creation complete $TESTDIR"
+  local ma="defaulting to datestamp"
+  local mb="Success, archive creation complete $TESTDIR"
   local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt -b $TESTDIR)
   local archive=$(echo "$out" | grep "$matchtwo" | awk '{print $NF}')
-  [ -f $archive.gpg ] && rm $archive.gpg
-  if [[ $out =~ $match ]] && [[ $out =~ $matchtwo ]];then echo "0";else echo "1";fi
+  [[ -f $archive.gpg ]] && rm $archive.gpg
+  if [[ $out =~ $ma ]] && [[ $out =~ $mb ]];then
+    echo "0"
+  else
+    echo "1"
+    [ $debug ] && echo -e "$out"
+  fi
 }
 
 test_create_new_archive() {
   local match="Success, archive creation complete"
   local out=$(./mubag.sh -v --test $TESTPASS --new -b $TESTDIR/test.zip -a $TESTDIR/A.txt)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 fail_add_existing_file_in_archive() {
   local match="already exists inside"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -a $TESTDIR/A.txt)
   [ -f A.txt ] && rm A.txt
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_add_files_to_archive() {
   local passing=false
   local match="archive update complete"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -a $TESTDIR/B.txt)
-  if [[ $out =~ $match ]];then passing=true;else echo "1";fi
+  if [[ $out =~ $match ]];then passing=true;else echo "1";[ $debug ] && echo -e "$out";fi
   local out=$(./mubag.sh -v --test $TESTPASS --backup=$TESTDIR/test.zip.gpg --add=$TESTDIR/C.txt)
-  if [ $passing ] && [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [ $passing ] && [[ $out =~ $match ]];then
+    echo "0"
+  else
+    echo "1"
+    [ $debug ] && echo -e "$out"
+  fi
 }
 
 test_list_files_in_archive() {
   local match="CRC-32"
   local out=$(./mubag.sh -v --test $TESTPASS --backup $TESTDIR/test.zip.gpg --list)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_print_file_from_archive() {
   local match="END OUTPUT"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p A.txt 2>&1)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 fail_extract_file_not_found_in_archive() {
   local match="DNE.void not found within"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x DNE.void 2>&1)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_extract_file_from_archive() {
   local match="recovered from archive"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -x B.txt 2>&1)
   if [ -f B.txt ];then rm B.txt;fi
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 fail_edit_file_not_found_in_archive() {
   local match="DNE.void not found"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -e DNE.void)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_edit_file_within_archive() {
   local match="archive update complete"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -e C.txt)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 fail_update_unchanged_file() {
@@ -146,7 +185,7 @@ fail_update_unchanged_file() {
   local match="The file A.txt in the archive is identical"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt 2>&1)
   if [ -f A.txt ];then rm A.txt;fi
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 fail_update_file_not_found_in_archive() {
@@ -154,7 +193,7 @@ fail_update_file_not_found_in_archive() {
   touch DNE.void
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u DNE.void 2>&1)
   [ -f DNE.void ] && rm DNE.void
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_update_file_within_archive() {
@@ -163,19 +202,19 @@ test_update_file_within_archive() {
   local match="archive update complete"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -u A.txt 2>&1)
   if [ -f A.txt ];then rm A.txt;fi
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_remove_file_from_archive() {
   local match="B.txt removed from archive"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -r B.txt 2>&1)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 fail_to_find_file_in_archive() {
   local match="DNE.void not found in"
   local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg -p DNE.void 2>&1)
-  if [[ $out =~ $match ]];then echo "0";else echo "1";fi
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_echo()     { echo -ne "[${YL}TEST${RS}] Running $1 ... "; }
@@ -187,5 +226,3 @@ ok_echo()       { echo "${GN}OK${RS}"; }
 fail_echo()     { echo "${RD}${BD}FAIL${RS}"; }
 
 main
-exit 0;
-
