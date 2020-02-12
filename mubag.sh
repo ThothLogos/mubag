@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# TODO: Add --algo to forward options to gpg's --cipher-algo, use ALGO config for default
 # TODO: Add user to activity log
 # TODO: (?) Should log be nested so we can track failures? ie, a wrapper zip containing unencrypted log?
 # TODO: (?) What happens when when --print or edit a non-ASCII file? :) Can we detect that early?
@@ -80,7 +79,6 @@ main() {
   if [[ $list||$prnt||$extract||$update||$edit||$remove ]]||[[ $add && $backup && ! $create ]];then
     decrypt_zip $BACKUP
   fi
-  if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
   if [[ $create && $add ]] || [[ $add && ! $backup ]];then create_new_archive $FILE $BACKUP
   elif [[ $add && $backup ]];then # add file to existing archive
     if [[ $(check_file_existence $FILE $BACKUP) -eq 0 ]];then
@@ -128,7 +126,7 @@ main() {
 }
 
 parse_and_setup(){
-  if [ "$#" -lt 1 ] || [ "$#" -gt 10 ]; then
+  if [ "$#" -lt 1 ] || [ "$#" -gt 12 ]; then
     err_echo "Incorrect number of args, see --help:"
     display_usage
     exit 1
@@ -144,10 +142,11 @@ parse_and_setup(){
       -ne|--no-encrypt) preventencrypt=true; shift 1;;
       -n|--new) create=true; shift 1;;
 
+      -al|--algo|--cipher-algo) algo=true; if [ $# -gt 1 ];then ALGO="$2"; shift 2
+                else err_echo "--algo missing ALGO option!";exit 1;fi;;
+
       -b|--backup) backup=true; if [ $# -gt 1 ];then BACKUP="$2";shift 2
                 else err_echo "--backup missing FILE!";exit 1;fi;;
-      -o|--out) out=true; if [ $# -gt 1 ];then OUTFILE="$2";shift 2
-                else err_echo "--out missing FILE!";exit 1;fi;;
       -t|--test) test=true; if [ $# -gt 1 ];then testpass="$2"; shift 2
                 else err_echo "--test requires a PASSPHRASE passed with it to automate!";exit 1;fi;;
       -a|--add) add=true; if [ $# -gt 1 ];then FILE="$2"; shift 2
@@ -164,8 +163,8 @@ parse_and_setup(){
                 else err_echo "--remove missing FILE!";exit 1;fi;;
 
       --test=*) test=true; testpass="${1#*=}"; shift 1;;
+      --algo=*|--cipher-algo=*) algo=true; ALGO="${1#*=}"; shift 1;;
       --backup=*) backup=true; BACKUP="${1#*=}"; shift 1;;
-      --out=*) out=true; OUTFILE="${1#*=}"; shift 1;;
       --add=*) add=true; FILE="${1#*=}"; shift 1;;
       --print=*) prnt=true; FILE="${1#*=}"; shift 1;;
       --extract=*) extract=true; FILE="${1#*=}"; shift 1;;
@@ -177,11 +176,18 @@ parse_and_setup(){
       *) handle_argument "$1"; shift 1;;
     esac
   done
-
   LOG_DISABLED=false
 }
 
 sanity_check_args() {
+  if [[ $algo && ! $create ]];then
+    err_echo "Setting the encryption --algo algorithm currently only supported for --new archives"
+    exit 1
+  elif ! [[ $(gpg_get_available_ciphers | grep "\b$ALGO\b") ]];then
+    err_echo "The --algo/--cipher-algo $ALGO is not supported by the installed version of gpg."
+      echo "The supported ciphers are: $(gpg_get_available_ciphers)"
+    exit 1
+  fi
   if [[ $create && ! $add ]];then
     err_echo "If you're using --new you must specify a file to --add/-a, too!"
     display_usage
@@ -194,7 +200,6 @@ sanity_check_args() {
       create_echo "--backup was blank or resolves to a directory, defaulting to datestamp" \
         "for filename: $BACKUP"
     fi
-
   fi
   if [ $backup ];then
     if ! [[ $add || $prnt || $extract || $edit || $update || $remove || $list || $decrypt ]];then
@@ -216,27 +221,28 @@ sanity_check_args() {
     err_echo "The file targeted for add/update ($FILE) not found!"
     exit 1
   fi
+  if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
 }
 
 remove_file_from_archive() {
-  local unencrypted_zip=$2
-  [ $verbose ] && remove_echo "Attempting to remove $FILE from $unencrypted_zip"
-  zip --delete $unencrypted_zip $FILE
+  local unenc_zip=$2
+  [ $verbose ] && remove_echo "Attempting to remove $FILE from $unenc_zip"
+  zip --delete $unenc_zip $FILE
   if ! [[ $? -eq 0 ]];then
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
-    ! [ $skiplog ] && remove_log "Removal of $FILE failed, does not exist in $unencrypted_zip"
-    err_echo "File $FILE not found within $unencrypted_zip, aborting"
+    if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
+    ! [ $skiplog ] && remove_log "Removal of $FILE failed, does not exist in $unenc_zip"
+    err_echo "File $FILE not found within $unenc_zip, aborting"
     err_exit
   else
-    ! [ $skiplog ] && remove_log "Removal of $FILE from $unencrypted_zip was successful"
+    ! [ $skiplog ] && remove_log "Removal of $FILE from $unenc_zip was successful"
     remove_echo "Success, $FILE removed from archive"
   fi
 }
 
 check_file_existence() {
   local file=$1
-  local unencrypted_zip=$2
-  unzip -v $unencrypted_zip | grep $(basename $file) >/dev/null
+  local unenc_zip=$2
+  unzip -v $unenc_zip | grep $(basename $file) >/dev/null
   if [[ $? -eq 0 ]];then
     echo 0
   else
@@ -245,10 +251,10 @@ check_file_existence() {
 }
 
 extract_logfile() {
-  local unencrypted_zip=$2
-  [ $verbose ] && log_echo "Attempting to extract activity.log from $unencrypted_zip"
-  if [[ $(check_file_existence $LOG $unencrypted_zip) -eq 0 ]];then
-    unzip -j $unencrypted_zip $LOG
+  local unenc_zip=$2
+  [ $verbose ] && log_echo "Attempting to extract activity.log from $unenc_zip"
+  if [[ $(check_file_existence $LOG $unenc_zip) -eq 0 ]];then
+    unzip -j $unenc_zip $LOG
   else
     [ $verbose ] && log_echo "No activity.log present in this archive, one will be created"
   fi
@@ -257,37 +263,37 @@ extract_logfile() {
 
 extract_file_from_archive() {
   local file=$1
-  local unencrypted_zip=$2
-  [ $verbose ] && extract_echo "Attempting to extract $file from $unencrypted_zip"
-  if [[ $(check_file_existence $file $unencrypted_zip ) -eq 0 ]];then
-    unzip -j $unencrypted_zip $file
+  local unenc_zip=$2
+  [ $verbose ] && extract_echo "Attempting to extract $file from $unenc_zip"
+  if [[ $(check_file_existence $file $unenc_zip ) -eq 0 ]];then
+    unzip -j $unenc_zip $file
     if [[ $? -eq 0 ]];then
-      extract_echo "Success, $file recovered from archive $unencrypted_zip"
-      ! [ $skiplog ] && extract_log "Extraction of $file from $unencrypted_zip was successful"
+      extract_echo "Success, $file recovered from archive $unenc_zip"
+      ! [ $skiplog ] && extract_log "Extraction of $file from $unenc_zip was successful"
     else
       err_echo "Unzip failed during extraction with code $?"
       err_exit
     fi
   else
-    ! [ $skiplog ] && extract_log "Extraction of $file failed, does not exist in $unencrypted_zip"
-    err_echo "File $file not found within $unencrypted_zip, aborting"
+    ! [ $skiplog ] && extract_log "Extraction of $file failed, does not exist in $unenc_zip"
+    err_echo "File $file not found within $unenc_zip, aborting"
     err_exit
   fi
 }
 
 create_new_archive() {
   local file=$1
-  local unencrypted_zip=$2
+  local unenc_zip=$2
   if [ $BACKUP ] && [ -f $BACKUP ];then
     err_echo "--backup $BACKUP would over-write an existing file! If you are trying to modify that" \
       "archive, don't use --new/-n. Select a different file name and try again."
     err_exit
   fi
-  zip -rj $unencrypted_zip $file # -rj abandon directory structure of files added
+  zip -rj $unenc_zip $file # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
-    if ! [ $skiplog ];then create_log "File $file was added or updated within $unencrypted_zip";fi
-    create_echo "Success, archive creation complete $unencrypted_zip"
-    ! [ $skiplog ] && create_log "New archive $unencrypted_zip created"
+    if ! [ $skiplog ];then create_log "File $file was added or updated within $unenc_zip";fi
+    create_echo "Success, archive creation complete $unenc_zip"
+    ! [ $skiplog ] && create_log "New archive $unenc_zip created"
   elif [[ $? -eq 12 ]];then
     create_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
     err_exit
@@ -299,13 +305,13 @@ create_new_archive() {
 
 update_archive() {
   local file=$1
-  local unencrypted_zip=$2
-  zip -urj $unencrypted_zip $file # -rj abandon directory structure of files added
+  local unenc_zip=$2
+  zip -urj $unenc_zip $file # -rj abandon directory structure of files added
   if [[ $? -eq 0 ]];then
     if ! [ $skiplog ];then # && ! [[ "$file" == "$LOG" ]];then 
-      add_update_log "File $file was updated within $unencrypted_zip"
+      add_update_log "File $file was updated within $unenc_zip"
     fi
-    add_update_echo "Success, archive update complete $unencrypted_zip"
+    add_update_echo "Success, archive update complete $unenc_zip"
   elif [[ $? -eq 12 ]];then
     add_update_echo "[${YL}NO-OP${RS}] zip update failed 'nothing to do'?"
     err_exit
@@ -317,33 +323,33 @@ update_archive() {
 
 print_file_from_archive() {
   local file=$1
-  local unencrypted_zip=$2
-  [ $verbose ] && print_echo "Attempting to route $file to STDOUT from $unencrypted_zip"
+  local unenc_zip=$2
+  [ $verbose ] && print_echo "Attempting to route $file to STDOUT from $unenc_zip"
   if ! [[ $(check_file_existence $file $BACKUP) -eq 0 ]];then
     err_echo "$file not found in $BACKUP.gpg, can't --print!"
     err_exit
   fi
   echo "${WH}${BD}--- BEGIN OUTPUT ---${RS}"
-  unzip -p $unencrypted_zip $(basename $file)
+  unzip -p $unenc_zip $(basename $file)
   echo "${WH}${BD}---  END OUTPUT  ---${RS}"
-  ! [ $skiplog ] && print_log "$file was successfully routed to STDOUT from $unencrypted_zip"
+  ! [ $skiplog ] && print_log "$file was successfully routed to STDOUT from $unenc_zip"
 }
 
 list_archive_contents() {
-  local unencrypted_zip=$1
-  unzip -v $unencrypted_zip
+  local unenc_zip=$1
+  unzip -v $unenc_zip
   if ! [[ $? -eq 0 ]];then err_echo "Unknown unzip error during --list!";fi
-  ! [ $skiplog ] && list_log "The contents of $unencrypted_zip were displayed via --list"
+  ! [ $skiplog ] && list_log "The contents of $unenc_zip were displayed via --list"
 }
 
 edit_file_from_archive() {
   local file=$1
-  local unencrypted_zip=$2
-  if ! [[ $(check_file_existence $file $unencrypted_zip) ]];then
+  local unenc_zip=$2
+  if ! [[ $(check_file_existence $file $unenc_zip) ]];then
     err_echo "Edit failed - $file not found in the archive!"
     err_exit
   fi
-  extract_file_from_archive $file $unencrypted_zip
+  extract_file_from_archive $file $unenc_zip
   filehash_orig=$(checksum $file)
   if [ $test ];then # skip the whole interactive bit, just modify the file
     echo "Ch-ch-ch-ch-changes" >> $file
@@ -364,11 +370,11 @@ edit_file_from_archive() {
       edit_echo "$file was left unchanged, archive will remain unchanged, cleaning up"
     else
       ! [ $skiplog ] && edit_log "$file was opened in an editor and successfully modified"
-      update_archive $file $unencrypted_zip
+      update_archive $file $unenc_zip
     fi
   else
     err_echo "Editor \"$EDITOR\" exited with a non-zero status! ($?) Cleaning up exposed files."
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
     if [ -f $file ];then secure_remove_file $file;fi
     exit 1
   fi
@@ -377,63 +383,63 @@ edit_file_from_archive() {
 
 decrypt_zip() {
   [ $verbose ] && decrypt_echo "Attempting gpg decrypt"
-  local unencrypted_zip=${1%????}
+  local unenc_zip=$1
   local exit_msg
   if [[ $test ]];then
-    exit_msg="$(gpg -q --batch --yes --passphrase $testpass -o $unencrypted_zip --decrypt $1 2>&1)"
+    gpg -q --batch --yes --passphrase $testpass -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1
   else
-    exit_msg="$(gpg -q -o $unencrypted_zip --decrypt $1 2>&1)"
+    gpg -q -o $unenc_zip --decrypt $unenc_zip.gpg 2>&1
   fi
   if [[ $? -eq 0 ]]; then
-    decrypt_echo "Success, $unencrypted_zip has been restored"
+    decrypt_echo "Success, $unenc_zip has been restored"
     if ! [ $skiplog ];then
-      extract_logfile $LOG $unencrypted_zip && decrypt_log "Archive $unencrypted_zip.gpg" \
+      extract_logfile $LOG $unenc_zip && decrypt_log "Archive $unenc_zip.gpg" \
         "successfully decrypted"
       if ! [[ $? -eq 0 ]];then
-        err_echo "Failed to extract and update $LOG from $unencrypted_zip!"
+        err_echo "Failed to extract and update $LOG from $unenc_zip!"
         exit 1
       fi
     fi
   elif [[ $(echo "$exit_msg" | grep "Bad session key") ]];then
     err_echo "GPG decryption failed due to incorrect passphrase! Exiting."
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
     exit 1
   else
     err_echo "GPG decryption error! Exiting."
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
     exit 1
   fi
 }
 
 encrypt_zip() {
   [ $verbose ] && encrypt_echo "Attempting gpg encrypt"
-  local unencrypted_zip=$1
+  local unenc_zip=$1
   if ! [ $skiplog ];then
-    encrypt_log "Encrypting $unencrypted_zip"
-    local msg=$(zip -urj $unencrypted_zip $LOG)
+    encrypt_log "Encrypting $unenc_zip"
+    local msg=$(zip -urj $unenc_zip $LOG)
     if [[ $? -eq 0 ]];then
-      log_echo "Archive log successfully updated within $unencrypted_zip"
+      log_echo "Archive log successfully updated within $unenc_zip"
       if [ -f $LOG ];then secure_remove_file $LOG;fi
     else
       warn_echo "Archive log exited $?, message: $msg"
       if [ -f $LOG ];then secure_remove_file $LOG;fi
-      if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+      if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
       exit 1
     fi
   fi
   if [[ $test ]];then
-    gpg -q --batch --yes --passphrase $testpass --cipher-algo $ALGO --symmetric $unencrypted_zip
+    gpg -q --batch --yes --passphrase $testpass --cipher-algo $ALGO --symmetric $unenc_zip
   elif [[ $add || $update || $remove || $edit || $list || $prnt ]];then
     # --yes during read-only (activity.log updates) and during user explicit writes
-    gpg -q --yes --cipher-algo $ALGO --symmetric $unencrypted_zip
+    gpg -q --yes --cipher-algo $ALGO --symmetric $unenc_zip
   else # in other situations we may want to confirm over-writing if it crops up
-    gpg -q --cipher-algo $ALGO --symmetric $unencrypted_zip
+    gpg -q --cipher-algo $ALGO --symmetric $unenc_zip
   fi
   if [[ $? -eq 0 ]];then
-    encrypt_echo "Success, $unencrypted_zip.gpg protected by $ALGO"
+    encrypt_echo "Success, $unenc_zip.gpg protected by $ALGO"
     LOG_DISABLED=true
   else
-    if [ -f $unencrypted_zip ];then secure_remove_file $unencrypted_zip;fi
+    if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
     err_echo "GPG encryption error! Exiting."
     exit 1
   fi
@@ -483,6 +489,12 @@ gpg_clear_cache() {
     warn_echo "GPG agent reload has failed! Cached symkeys may still be present. You can try to" \
       "run 'gpg-connectagent reloadagent /bye' to try again, or kill the agent process manually. "
   fi
+}
+
+gpg_get_available_ciphers() {
+  local ciphers=$(gpg --version | grep -A1 Cipher | sed 's/Cipher://g' | tr '\n' ' ')
+  IFS=', ' read -r -a ciphers <<< "$ciphers"
+  echo ${ciphers[@]}
 }
 
 append_to_activity_log() {
