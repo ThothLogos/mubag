@@ -16,9 +16,11 @@ done
 
 main() {
   setup
+  do_test "fail_create_new_archive_with_invalid_cipher_algo"
   do_test "test_create_new_archive_default_name_when_backup_missing"
   do_test "test_create_new_archive_default_when_backup_is_a_directory"
   do_test "test_create_new_archive"
+  do_test "test_decrypt_and_warn"
   do_test "fail_add_existing_file_in_archive"
   do_test "test_add_files_to_archive"
   do_test "test_list_files_in_archive"
@@ -80,12 +82,17 @@ do_test() {
 
 report_results() {
   if [[ $passes == $testcount ]];then
-    echo -e "\n\t${GN}${BD}SUCCESS${RS} - All tests passed! $passes of $testcount"
+    echo -e "\n\t${GN}${BD}SUCCESS${RS} - All tests passed! $passes of $testcount\n"
   else
     echo -e "\n\t${RD}${BD}FAILURE${RS} - Some tests failed. $passes of $testcount pass," \
-      "$fails failed."
+      "$fails failed\n"
   fi
-  echo
+}
+
+fail_create_new_archive_with_invalid_cipher_algo() {
+  local match="FAKECIPHER is not supported by the installed version of gpg"
+  local out=$(./mubag.sh -v --test $TESTPASS --new -a $TESTDIR/A.txt --algo FAKECIPHER)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
 test_create_new_archive_default_name_when_backup_missing() {
@@ -119,6 +126,12 @@ test_create_new_archive_default_when_backup_is_a_directory() {
 test_create_new_archive() {
   local match="Success, archive creation complete"
   local out=$(./mubag.sh -v --test $TESTPASS --new -b $TESTDIR/test.zip -a $TESTDIR/A.txt)
+  if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
+}
+
+test_decrypt_and_warn() {
+  local match="You have just decrypted"
+  local out=$(./mubag.sh -v --test $TESTPASS -b $TESTDIR/test.zip.gpg --decrypt)
   if [[ $out =~ $match ]];then echo "0";else echo "1";[ $debug ] && echo -e "$out";fi
 }
 
