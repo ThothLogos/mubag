@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# TODO: Test every exit route in existing functionality, many failures missing
-
 TESTDIR="test_temp"
 TESTPASS="gogo"
 source config.sh
