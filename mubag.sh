@@ -122,8 +122,7 @@ parse_and_setup(){
       --update=*) update=true; FILE="${1#*=}"; shift 1;;
       --remove=*) remove=true; FILE="${1#*=}"; shift 1;;
 
-      -*) err_echo "Unknown option $1" >&2; display_usage; exit 1;;
-      *) handle_argument "$1"; shift 1;;
+      *) err_echo "Unknown option $1" >&2; display_usage; exit 1;;
     esac
   done
   LOG_DISABLED=false
@@ -405,8 +404,7 @@ decrypt_zip() {
     fi
   elif [[ $(echo "$exit_msg" | grep "Bad session key") ]];then
     err_echo "GPG decryption failed due to incorrect passphrase! Exiting."
-    if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
-    exit 1
+    err_exit
   else
     err_echo "GPG decryption error! Exiting."
     if [ -f $unenc_zip ];then secure_remove_file $unenc_zip;fi
@@ -450,17 +448,17 @@ encrypt_zip() {
 
 secure_remove_file() {
   local file=$1
-  if [ $test ] && ! [ $skiplog ] && ! [[ $file == $LOG || $LOG_DISABLED ]];then
+  if [ $test ] && ! [ $skiplog ];then
     unsecure_remove_file $file # Avoid unnecessary SSD wear during tests
   else
-    if   command -v srm >/dev/null;  then srm -zv $file
-    elif command -v shred >/dev/null;then shred -uz $file
+    if   command -v srm >/dev/null;  then srm -zv $file;local cmd="srm -zv"
+    elif command -v shred >/dev/null;then shred -uz $file;local cmd="shred -uz"
     else
       cleanup_echo "Secure file removal not found on system, resorting to using rm"
       unsecure_remove_file $file
     fi
     if [[ $? -eq 0 ]];then
-      if ! [ $skiplog ] && ! [[ $1 == $LOG || $LOG_DISABLED ]];then
+      if ! [ $skiplog ] && ! [[ $file == $LOG || $LOG_DISABLED ]];then
         cleanup_log "$file securely erased with: $cmd"
       fi
       cleanup_echo "Success, $file purged securely via: $cmd"
@@ -475,8 +473,9 @@ unsecure_remove_file() {
   local file=$1
   rm -f $file
   if [[ $? -eq 0 ]]; then
-    ! [ $skiplog ] && ! [[ $file == $LOG ]] && cleanup_log "No secure removal found, $file" \
-      "removed via: $cmd"
+    if ! [ $skiplog ] && ! [[ $file == $LOG || $LOG_DISABLED ]];then
+      cleanup_log "No secure removal found, $file removed via: rm -f"
+    fi
     cleanup_echo "Success, rm of $file complete"
   else
     err_echo "File removal with rm failed! (Somehow?? You figure this one out.)"
@@ -521,8 +520,9 @@ trap_cleanup() {
 }
 
 err_exit() {
-  if ! [ $preventencrypt ];then encrypt_zip $BACKUP;fi
+  if [[ ! $preventencrypt && ! $decrypt ]];then encrypt_zip $BACKUP;fi
   if [[ $backup ]] && [[ -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
+  if [[ ! $skiplog && -f $LOG ]];then secure_remove_file $LOG;fi
   gpg_clear_cache
   exit 1
 }
