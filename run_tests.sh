@@ -15,13 +15,14 @@ display_usage() {
   "
 }
 
+err_echo()      { echo "[${RD}${BD}!!!${RS}] ${RD}${BD}ERROR${RS} [${RD}${BD}!!!${RS}] - $*"; }
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help) display_usage; exit 0;;
     -d|--debug) debug=true; shift 1;;
     -f|--fail-early) failearly=true; shift 1;;
-    -*) err_echo "Unknown option $1" >&2; exit 1;;
-    *) handle_argument "$1"; shift 1;;
+    *) err_echo "Unknown command: $1" >&2; exit 1;;
   esac
 done
 
@@ -253,7 +254,6 @@ test_echo()     { echo -ne "[${YL}TEST${RS}] Running $1 ... "; }
 setup_echo()    { echo -ne "$*"; }
 shutdown_echo() { echo "$*"; }
 warn_echo()     { echo "[${YL}${BD}!!!${RS}] ${BD}WARNING${RS} [${YL}${BD}!!!${RS}] - $*";    }
-err_echo()      { echo "[${RD}${BD}!!!${RS}] ${RD}${BD}ERROR${RS} [${RD}${BD}!!!${RS}] - $*"; }
 ok_echo()       { echo "${GN}OK${RS}"; }
 fail_echo()     { echo "${RD}${BD}FAIL${RS}"; }
 
