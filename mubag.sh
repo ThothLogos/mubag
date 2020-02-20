@@ -395,12 +395,7 @@ decrypt_zip() {
   if [[ $? -eq 0 ]]; then
     decrypt_echo "Success, $unenc_zip has been restored"
     if ! [ $skiplog ];then
-      extract_logfile $LOG $unenc_zip && decrypt_log "Archive $unenc_zip.gpg" \
-        "successfully decrypted"
-      if ! [[ $? -eq 0 ]];then
-        err_echo "Failed to extract and update $LOG from $unenc_zip!"
-        exit 1
-      fi
+      extract_logfile $LOG $unenc_zip && decrypt_log "Archive $unenc_zip.gpg successfully decrypted"
     fi
   elif [[ $(echo "$exit_msg" | grep "Bad session key") ]];then
     err_echo "GPG decryption failed due to incorrect passphrase! Exiting."
@@ -513,7 +508,7 @@ checksum() {
 
 trap_cleanup() {
   if [[ $BACKUP == *.gpg ]];then BACKUP=${BACKUP%????};fi # chop off .gpg
-  if [[ $BACKUP && $BACKUP == *.zip && -f $BACKUP ]];then secure_remove_file $BACKUP;fi
+  if [[ $BACKUP && $BACKUP == *.zip && -f $BACKUP && ! $decrypt ]];then secure_remove_file $BACKUP;fi
   if [[ $prnt || $edit ]] && [[ -f $FILE ]];then secure_remove_file $FILE;fi
   gpg_clear_cache
   exit 1
